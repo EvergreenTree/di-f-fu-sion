@@ -175,7 +175,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
 
         model_index_dict = dict(self.config)
         model_index_dict.pop("_class_name")
-        model_index_dict.pop("_diffusers_version")
+        # model_index_dict.pop("_diffusers_version")
         model_index_dict.pop("_module", None)
 
         if push_to_hub:
