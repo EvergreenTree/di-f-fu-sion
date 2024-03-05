@@ -40,6 +40,8 @@ from .utils import (
     logging,
 )
 
+import diffusers # only for class compatibility
+
 
 if is_transformers_available():
     from transformers import FlaxPreTrainedModel
@@ -120,6 +122,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
         from diffusers import pipelines
 
         for name, module in kwargs.items():
+            # print(name, module)
             if module is None:
                 register_dict = {name: (None, None)}
             else:
@@ -194,20 +197,22 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
 
             model_cls = sub_model.__class__
 
-            save_method_name = None
-            # search for the model's base class in LOADABLE_CLASSES
-            for library_name, library_classes in LOADABLE_CLASSES.items():
-                library = importlib.import_module(library_name)
-                for base_class, save_load_methods in library_classes.items():
-                    class_candidate = getattr(library, base_class, None)
-                    if class_candidate is not None and issubclass(model_cls, class_candidate):
-                        # if we found a suitable base class in LOADABLE_CLASSES then grab its save method
-                        save_method_name = save_load_methods[0]
-                        break
-                if save_method_name is not None:
-                    break
-
-            save_method = getattr(sub_model, save_method_name)
+            # save_method_name = None
+            # # search for the model's base class in LOADABLE_CLASSES
+            # for library_name, library_classes in LOADABLE_CLASSES.items():
+            #     library = importlib.import_module(library_name)
+            #     for base_class, save_load_methods in library_classes.items():
+            #         class_candidate = getattr(library, base_class, None)
+            #         if class_candidate is not None and issubclass(model_cls, class_candidate):
+            #             # if we found a suitable base class in LOADABLE_CLASSES then grab its save method
+            #             save_method_name = save_load_methods[0]
+            #             break
+            #     if save_method_name is not None:
+            #         break
+            # print(sub_model, save_method_name)
+            # save_method = getattr(sub_model, save_method_name)
+            
+            save_method = getattr(sub_model, "save_pretrained")
             expects_params = "params" in set(inspect.signature(save_method).parameters.keys())
 
             if expects_params:
@@ -329,7 +334,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
         # 1. Download the checkpoints and configs
         # use snapshot download here to get it working from from_pretrained
         if not os.path.isdir(pretrained_model_name_or_path):
-            raise NotImplementedError
+            raise NotImplementedError("Hub is disabled")
             # config_dict = cls.load_config(
             #     pretrained_model_name_or_path,
             #     cache_dir=cache_dir,
@@ -497,8 +502,8 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
                     loadable_folder = os.path.join(cached_folder, name)
                 else:
                     loaded_sub_model = cached_folder
-
-                if issubclass(class_obj, FlaxModelMixin):
+                    
+                if issubclass(class_obj, FlaxModelMixin) or issubclass(class_obj, diffusers.FlaxModelMixin):
                     loaded_sub_model, loaded_params = load_method(
                         loadable_folder,
                         from_pt=from_pt,
@@ -516,7 +521,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
                     else:
                         loaded_sub_model, loaded_params = load_method(loadable_folder, _do_init=False)
                     params[name] = loaded_params
-                elif issubclass(class_obj, FlaxSchedulerMixin):
+                elif issubclass(class_obj, FlaxSchedulerMixin) or issubclass(class_obj, diffusers.FlaxSchedulerMixin):
                     loaded_sub_model, scheduler_state = load_method(loadable_folder)
                     params[name] = scheduler_state
                 else:

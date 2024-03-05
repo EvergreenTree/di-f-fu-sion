@@ -39,7 +39,7 @@ from ..utils import (
     FLAX_WEIGHTS_NAME,
     HUGGINGFACE_CO_RESOLVE_ENDPOINT,
     WEIGHTS_NAME,
-    # PushToHubMixin,
+    PushToHubMixin,
     logging,
     is_torch_available,
 )
@@ -49,7 +49,7 @@ from .modeling_flax_pytorch_utils import convert_pytorch_state_dict_to_flax
 logger = logging.get_logger(__name__)
 
 
-class FlaxModelMixin():#PushToHubMixin):
+class FlaxModelMixin(PushToHubMixin):
     r"""
     Base class for all Flax models.
 

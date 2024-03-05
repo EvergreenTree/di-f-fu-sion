@@ -222,7 +222,12 @@ def parse_args():
     parser.add_argument(
         "--unet_config_path",
         default=None,
-        help="If specified, re-initialize the unet with the given config.(Optional)",
+        help="If specified, re-initialize the unet with the given config (Optional)",
+    )
+    parser.add_argument(
+        "--dry_run",
+        action="store_true",
+        help="Do not train, save.",
     )
 
     args = parser.parse_args()
@@ -601,40 +606,42 @@ def main():
 
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-    logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel & distributed) = {total_train_batch_size}")
-    logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    if not args.dry_run:
+        logger.info("***** Running training *****")
+        logger.info(f"  Num examples = {len(train_dataset)}")
+        logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+        logger.info(f"  Total train batch size (w. parallel & distributed) = {total_train_batch_size}")
+        logger.info(f"  Total optimization steps = {args.max_train_steps}")
 
-    global_step = 0
+        global_step = 0
 
-    epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
-    for epoch in epochs:
-        # ======================== Training ================================
+        epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
+        for epoch in epochs:
+            # ======================== Training ================================
 
-        train_metrics = []
+            train_metrics = []
 
-        steps_per_epoch = len(train_dataset) // total_train_batch_size
-        train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
-        # train
-        for batch in train_dataloader:
-            batch = shard(batch)
-            state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
-            train_metrics.append(train_metric)
+            steps_per_epoch = len(train_dataset) // total_train_batch_size
+            train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
+            # train
+            for batch in train_dataloader:
+                batch = shard(batch)
+                state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
+                train_metrics.append(train_metric)
 
-            train_step_progress_bar.update(1)
+                train_step_progress_bar.update(1)
 
-            global_step += 1
-            if global_step >= args.max_train_steps:
-                break
+                global_step += 1
+                if global_step >= args.max_train_steps:
+                    break
 
-        train_metric = jax_utils.unreplicate(train_metric)
+            train_metric = jax_utils.unreplicate(train_metric)
 
-        train_step_progress_bar.close()
-        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+            train_step_progress_bar.close()
+            epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
 
+    logger.info("***** Saving model *****")
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
         scheduler = FlaxPNDMScheduler(
