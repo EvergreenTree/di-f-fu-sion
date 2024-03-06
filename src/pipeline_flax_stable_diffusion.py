@@ -524,6 +524,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
             height // self.vae_scale_factor,
             width // self.vae_scale_factor,
         )
+        prng_seed, rng = jax.random.split(prng_seed, 2)
         if latents is None:
             latents = jax.random.normal(prng_seed, shape=latents_shape, dtype=jnp.float32)
         else:
