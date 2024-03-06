@@ -477,10 +477,9 @@ def unshard(x: jnp.ndarray):
 
 
 class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
-
     def _generate(
         self,
-        prompt_ids: Optional[jnp.array], # support unconditional generation
+        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
         params: Union[Dict, FrozenDict],
         prng_seed: jax.Array,
         num_inference_steps: int,
@@ -495,10 +494,10 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
 
         # get prompt text embeddings
         # support unconditional generation
-        if prompt_ids is None:
+        if len(prompt_ids.shape) <= 2:
             prompt_embeds = negative_prompt_embeds = context = None
+            batch_size = prompt_ids.shape[0]
         else:
-
             prompt_embeds = self.text_encoder(prompt_ids, params=params["text_encoder"])[0]
 
             # TODO: currently it is assumed `do_classifier_free_guidance = guidance_scale > 1.0`

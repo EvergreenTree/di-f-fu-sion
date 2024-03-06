@@ -65,6 +65,14 @@ LOADABLE_CLASSES = {
         "FeatureExtractionMixin": ["save_pretrained", "from_pretrained"],
         "ProcessorMixin": ["save_pretrained", "from_pretrained"],
         "ImageProcessingMixin": ["save_pretrained", "from_pretrained"],
+        "CLIPImageProcessor": ["save_pretrained", "from_pretrained"],
+    },
+    "models": {
+        "FlaxUNet2DConditionModel": ["save_pretrained", "from_pretrained"],
+        "FlaxAutoencoderKL": ["save_pretrained", "from_pretrained"],
+    },
+    "schedulers": {
+        "FlaxPNDMScheduler": ["save_pretrained", "from_pretrained"],
     },
 }
 
@@ -79,9 +87,11 @@ def import_flax_or_no_model(module, class_name):
         class_obj = getattr(module, "Flax" + class_name)
     except AttributeError:
         # 2. If this doesn't work, it's not a model and we don't append "Flax"
-        class_obj = getattr(module, class_name)
-    except AttributeError:
-        raise ValueError(f"Neither Flax{class_name} nor {class_name} exist in {module}")
+        try:
+            # 3. An unreachability bug in the huggingface codebase
+            class_obj = getattr(module, class_name)
+        except AttributeError:
+            raise ValueError(f"Neither Flax{class_name} nor {class_name} exist in {module}")
 
     return class_obj
 
@@ -400,6 +410,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
         # in this case they are already instantiated in `kwargs`
         # extract them here
         expected_modules, optional_kwargs = cls._get_signature_keys(pipeline_class)
+
         passed_class_obj = {k: kwargs.pop(k) for k in expected_modules if k in kwargs}
         passed_pipe_kwargs = {k: kwargs.pop(k) for k in optional_kwargs if k in kwargs}
 
@@ -429,7 +440,9 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
         params = {}
 
         # import it here to avoid circular import
-        from diffusers import pipelines
+        # from diffusers import pipelines
+        # import locally
+        from . import pipelines
 
         # 3. Load each module in the pipeline
         for name, (library_name, class_name) in init_dict.items():
@@ -483,7 +496,10 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
                 class_candidates = {c: class_obj for c in importable_classes.keys()}
             else:
                 # else we just import it from the library.
-                library = importlib.import_module(library_name)
+                if library_name not in ['diffusers', 'transformers']:
+                    library = importlib.import_module('src.'+library_name) # workaround for 'models' is not importable
+                else:
+                    library = importlib.import_module(library_name) 
                 class_obj = import_flax_or_no_model(library, class_name)
 
                 importable_classes = LOADABLE_CLASSES[library_name]

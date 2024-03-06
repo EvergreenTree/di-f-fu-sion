@@ -14,15 +14,14 @@
 
 # from typing import TYPE_CHECKING
 
-# from ..utils import (
+from ..utils import (
 #     DIFFUSERS_SLOW_IMPORT,
 #     _LazyModule,
-#     is_flax_available,
+    is_flax_available,
 #     is_torch_available,
-# )
+)
 
-
-# _import_structure = {}
+_import_structure = {}
 
 # if is_torch_available():
 #     _import_structure["adapter"] = ["MultiAdapter", "T2IAdapter"]
@@ -51,8 +50,8 @@
 
 # if is_flax_available():
 #     _import_structure["controlnet_flax"] = ["FlaxControlNetModel"]
-#     _import_structure["unets.unet_2d_condition_flax"] = ["FlaxUNet2DConditionModel"]
-#     _import_structure["vae_flax"] = ["FlaxAutoencoderKL"]
+    # _import_structure["unets.unet_2d_condition_flax"] = ["FlaxUNet2DConditionModel"]
+    # _import_structure["vae_flax"] = ["FlaxAutoencoderKL"]
 
 
 # if TYPE_CHECKING or DIFFUSERS_SLOW_IMPORT:
@@ -90,6 +89,11 @@
 #         from .controlnet_flax import FlaxControlNetModel
 #         from .unets import FlaxUNet2DConditionModel
 #         from .vae_flax import FlaxAutoencoderKL
+
+if is_flax_available():
+    # from .controlnet_flax import FlaxControlNetModel
+    from .unet_2d_condition_flax import FlaxUNet2DConditionModel
+    from .vae_flax import FlaxAutoencoderKL
 
 # else:
 #     import sys
