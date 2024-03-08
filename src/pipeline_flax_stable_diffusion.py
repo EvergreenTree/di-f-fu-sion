@@ -583,3 +583,104 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
 
         image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
         return image
+
+
+class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
+    def __init__(
+        self,
+        unet,
+        scheduler,
+        dtype = jnp.float32,
+    ):
+        self.dtype=dtype
+        self.register_modules(
+            unet=unet,
+            scheduler=scheduler,
+            safety_checker=None
+        )
+
+    def _generate(
+        self,
+        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
+        params: Union[Dict, FrozenDict],
+        prng_seed: jax.Array,
+        num_inference_steps: int,
+        height: int,
+        width: int,
+        guidance_scale: float,
+        latents: Optional[jnp.ndarray] = None,
+        neg_prompt_ids: Optional[jnp.ndarray] = None,
+    ):
+
+        # get prompt text embeddings
+        # support unconditional generation
+        assert len(prompt_ids.shape) <= 2, "placeholders must have shape (batchsize, 1)"
+        prompt_embeds = negative_prompt_embeds = context = None
+        batch_size = prompt_ids.shape[0]
+
+        # Ensure model output will be `float32` before going into the scheduler
+        guidance_scale = jnp.array([guidance_scale], dtype=jnp.float32)
+
+        latents_shape = (
+            batch_size,
+            self.unet.config.in_channels,
+            height ,
+            width ,
+        )
+        prng_seed, rng = jax.random.split(prng_seed, 2)
+        if latents is None:
+            latents = jax.random.normal(rng, shape=latents_shape, dtype=jnp.float32)
+        else:
+            if latents.shape != latents_shape:
+                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
+
+        def loop_body(step, args):
+            latents, scheduler_state = args
+            # For classifier free guidance, we need to do two forward passes.
+            # Here we concatenate the unconditional and text embeddings into a single batch
+            # to avoid doing two forward passes
+            if context is not None:
+                latents_input = jnp.concatenate([latents] * 2)
+            else:
+                latents_input = latents
+
+            t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[step]
+            timestep = jnp.broadcast_to(t, latents_input.shape[0])
+
+            latents_input = self.scheduler.scale_model_input(scheduler_state, latents_input, t)
+
+            # predict the noise residual
+            noise_pred = self.unet.apply(
+                {"params": params["unet"]},
+                jnp.array(latents_input),
+                jnp.array(timestep, dtype=jnp.int32),
+                encoder_hidden_states=context,
+            ).sample
+            # perform guidance
+            if context is not None:
+                # get the current timestep of the scheduler
+                noise_pred_uncond, noise_prediction_text = jnp.split(noise_pred, 2, axis=0)
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+
+            # compute the previous noisy sample x_t -> x_t-1
+            latents, scheduler_state = self.scheduler.step(scheduler_state, noise_pred, t, latents).to_tuple()
+            return latents, scheduler_state
+
+        scheduler_state = self.scheduler.set_timesteps(
+            params["scheduler"], num_inference_steps=num_inference_steps, shape=latents.shape
+        )
+
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * params["scheduler"].init_noise_sigma
+
+        if DEBUG:
+            # run with python for loop
+            for i in range(num_inference_steps):
+                latents, scheduler_state = loop_body(i, (latents, scheduler_state))
+        else:
+            latents, _ = jax.lax.fori_loop(0, num_inference_steps, loop_body, (latents, scheduler_state))
+
+        image = latents
+
+        image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
+        return image
