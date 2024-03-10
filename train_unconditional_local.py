@@ -32,7 +32,11 @@ from src.schedulers.scheduling_ddpm_flax import FlaxDDPMScheduler
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
+<<<<<<< HEAD
 # check_min_version("0.25.0.dev0")
+=======
+# check_min_version("0.25.0.dev0")  
+>>>>>>> f875455942b2538c9c1082563bfcafcb38f89518
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +223,11 @@ def parse_args():
         default=False,
         help="Flag to indicate whether to convert models from PyTorch.",
     )
+    parser.add_argument(
+        "--unet_config_path",
+        default=None,
+        help="If specified, re-initialize the unet with the given config.(Optional)",
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -305,14 +314,14 @@ def main():
             raise ValueError(
                 f"--image_column' value '{args.image_column}' needs to be one of: {', '.join(column_names)}"
             )
-    if args.caption_column is None:
-        caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
-    else:
-        caption_column = args.caption_column
-        if caption_column not in column_names:
-            raise ValueError(
-                f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
-            )
+    # if args.caption_column is None:
+    #     caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
+    # else:
+    #     caption_column = args.caption_column
+    #     if caption_column not in column_names:
+    #         raise ValueError(
+    #             f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
+    #         )
 
     # Preprocessing the datasets.
     # We need to tokenize input captions and transform the images.
@@ -403,24 +412,33 @@ def main():
         subfolder="vae",
         dtype=weight_dtype,
     )
-    # unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
-    #     args.pretrained_model_name_or_path,
-    #     from_pt=args.from_pt,
-    #     revision=args.revision,
-    #     subfolder="unet",
-    #     dtype=weight_dtype,
-    # )
-    
-    config = FlaxUNet2DConditionModel.load_config('unet-config.json')
-    unet = FlaxUNet2DConditionModel.from_config(
-        config,
-        revision=args.revision,
-        dtype=weight_dtype,
-    )
     rng = jax.random.PRNGKey(args.seed)
-    rng, key = jax.random.split(rng)
-    unet_params = unet.init_weights(key)
-    
+    if args.unet_config_path:
+        config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
+        unet = FlaxUNet2DConditionModel.from_config(
+            config,
+            revision=args.revision,
+            dtype=weight_dtype,
+        )
+        rng, key = jax.random.split(rng)
+        unet_params = unet.init_weights(key)
+    else:
+        # raise NotImplementedError("Fine-tuning still needs some work.")
+        unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
+            args.pretrained_model_name_or_path,
+            from_pt=args.from_pt,
+            revision=args.revision,
+            subfolder="unet",
+            dtype=weight_dtype,
+        )
+        # in case of cross attention with shape [768, C], turn it into shape [C,C]
+        def prune(x):
+            if len(x.shape) > 1:
+                if x.shape[-2] == 768:
+                    # return x[...,:x.shape[-1],:]
+                    return jnp.eye(x.shape[-1])
+            return x
+        unet_params = jax.tree_map(prune, unet_params)
 
     # Optimization
     if args.scale_lr:
