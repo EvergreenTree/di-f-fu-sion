@@ -133,26 +133,27 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
         #     )
 
-        is_unet_version_less_0_9_0 = hasattr(unet.config, "_diffusers_version") and version.parse(
-            version.parse(unet.config._diffusers_version).base_version
-        ) < version.parse("0.9.0.dev0")
-        is_unet_sample_size_less_64 = hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
-        if is_unet_version_less_0_9_0 and is_unet_sample_size_less_64:
-            deprecation_message = (
-                "The configuration file of the unet has set the default `sample_size` to smaller than"
-                " 64 which seems highly unlikely .If you're checkpoint is a fine-tuned version of any of the"
-                " following: \n- CompVis/stable-diffusion-v1-4 \n- CompVis/stable-diffusion-v1-3 \n-"
-                " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- runwayml/stable-diffusion-v1-5"
-                " \n- runwayml/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
-                " configuration file. Please make sure to update the config accordingly as leaving `sample_size=32`"
-                " in the config might lead to incorrect results in future versions. If you have downloaded this"
-                " checkpoint from the Hugging Face Hub, it would be very nice if you could open a Pull request for"
-                " the `unet/config.json` file"
-            )
-            # deprecate("sample_size<64", "1.0.0", deprecation_message, standard_warn=False)
-            new_config = dict(unet.config)
-            new_config["sample_size"] = 64
-            unet._internal_dict = FrozenDict(new_config)
+        # # disable versioning
+        # is_unet_version_less_0_9_0 = hasattr(unet.config, "_diffusers_version") and version.parse(
+        #     version.parse(unet.config._diffusers_version).base_version
+        # ) < version.parse("0.9.0.dev0")
+        # is_unet_sample_size_less_64 = hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
+        # if is_unet_version_less_0_9_0 and is_unet_sample_size_less_64:
+        #     deprecation_message = (
+        #         "The configuration file of the unet has set the default `sample_size` to smaller than"
+        #         " 64 which seems highly unlikely .If you're checkpoint is a fine-tuned version of any of the"
+        #         " following: \n- CompVis/stable-diffusion-v1-4 \n- CompVis/stable-diffusion-v1-3 \n-"
+        #         " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- runwayml/stable-diffusion-v1-5"
+        #         " \n- runwayml/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
+        #         " configuration file. Please make sure to update the config accordingly as leaving `sample_size=32`"
+        #         " in the config might lead to incorrect results in future versions. If you have downloaded this"
+        #         " checkpoint from the Hugging Face Hub, it would be very nice if you could open a Pull request for"
+        #         " the `unet/config.json` file"
+        #     )
+        #     # deprecate("sample_size<64", "1.0.0", deprecation_message, standard_warn=False)
+        #     new_config = dict(unet.config)
+        #     new_config["sample_size"] = 64
+        #     unet._internal_dict = FrozenDict(new_config)
 
         self.register_modules(
             vae=vae,
@@ -475,11 +476,10 @@ def unshard(x: jnp.ndarray):
 
 
 
-class FlaxUnconditionalStableDiffusionPipeline(FlaxDiffusionPipeline):
-
+class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
     def _generate(
         self,
-        prompt_ids: Optional[jnp.array], # support unconditional generation
+        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
         params: Union[Dict, FrozenDict],
         prng_seed: jax.Array,
         num_inference_steps: int,
@@ -494,10 +494,10 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxDiffusionPipeline):
 
         # get prompt text embeddings
         # support unconditional generation
-        if prompt_ids is None:
+        if len(prompt_ids.shape) <= 2:
             prompt_embeds = negative_prompt_embeds = context = None
+            batch_size = prompt_ids.shape[0]
         else:
-
             prompt_embeds = self.text_encoder(prompt_ids, params=params["text_encoder"])[0]
 
             # TODO: currently it is assumed `do_classifier_free_guidance = guidance_scale > 1.0`
@@ -524,6 +524,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxDiffusionPipeline):
             height // self.vae_scale_factor,
             width // self.vae_scale_factor,
         )
+        prng_seed, rng = jax.random.split(prng_seed, 2)
         if latents is None:
             latents = jax.random.normal(prng_seed, shape=latents_shape, dtype=jnp.float32)
         else:
@@ -579,6 +580,107 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxDiffusionPipeline):
         # scale and decode the image latents with vae
         latents = 1 / self.vae.config.scaling_factor * latents
         image = self.vae.apply({"params": params["vae"]}, latents, method=self.vae.decode).sample
+
+        image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
+        return image
+
+
+class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
+    def __init__(
+        self,
+        unet,
+        scheduler,
+        dtype = jnp.float32,
+    ):
+        self.dtype=dtype
+        self.register_modules(
+            unet=unet,
+            scheduler=scheduler,
+            safety_checker=None
+        )
+
+    def _generate(
+        self,
+        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
+        params: Union[Dict, FrozenDict],
+        prng_seed: jax.Array,
+        num_inference_steps: int,
+        height: int,
+        width: int,
+        guidance_scale: float,
+        latents: Optional[jnp.ndarray] = None,
+        neg_prompt_ids: Optional[jnp.ndarray] = None,
+    ):
+
+        # get prompt text embeddings
+        # support unconditional generation
+        assert len(prompt_ids.shape) <= 2, "placeholders must have shape (batchsize, 1)"
+        prompt_embeds = negative_prompt_embeds = context = None
+        batch_size = prompt_ids.shape[0]
+
+        # Ensure model output will be `float32` before going into the scheduler
+        guidance_scale = jnp.array([guidance_scale], dtype=jnp.float32)
+
+        latents_shape = (
+            batch_size,
+            self.unet.config.in_channels,
+            height ,
+            width ,
+        )
+        prng_seed, rng = jax.random.split(prng_seed, 2)
+        if latents is None:
+            latents = jax.random.normal(rng, shape=latents_shape, dtype=jnp.float32)
+        else:
+            if latents.shape != latents_shape:
+                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
+
+        def loop_body(step, args):
+            latents, scheduler_state = args
+            # For classifier free guidance, we need to do two forward passes.
+            # Here we concatenate the unconditional and text embeddings into a single batch
+            # to avoid doing two forward passes
+            if context is not None:
+                latents_input = jnp.concatenate([latents] * 2)
+            else:
+                latents_input = latents
+
+            t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[step]
+            timestep = jnp.broadcast_to(t, latents_input.shape[0])
+
+            latents_input = self.scheduler.scale_model_input(scheduler_state, latents_input, t)
+
+            # predict the noise residual
+            noise_pred = self.unet.apply(
+                {"params": params["unet"]},
+                jnp.array(latents_input),
+                jnp.array(timestep, dtype=jnp.int32),
+                encoder_hidden_states=context,
+            ).sample
+            # perform guidance
+            if context is not None:
+                # get the current timestep of the scheduler
+                noise_pred_uncond, noise_prediction_text = jnp.split(noise_pred, 2, axis=0)
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_prediction_text - noise_pred_uncond)
+
+            # compute the previous noisy sample x_t -> x_t-1
+            latents, scheduler_state = self.scheduler.step(scheduler_state, noise_pred, t, latents).to_tuple()
+            return latents, scheduler_state
+
+        scheduler_state = self.scheduler.set_timesteps(
+            params["scheduler"], num_inference_steps=num_inference_steps, shape=latents.shape
+        )
+
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * params["scheduler"].init_noise_sigma
+
+        if DEBUG:
+            # run with python for loop
+            for i in range(num_inference_steps):
+                latents, scheduler_state = loop_body(i, (latents, scheduler_state))
+        else:
+            latents, _ = jax.lax.fori_loop(0, num_inference_steps, loop_body, (latents, scheduler_state))
+
+        image = latents
 
         image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
         return image

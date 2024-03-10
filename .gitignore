@@ -1,5 +1,7 @@
 # saved models
 /sd-*
+/setup.py
+/train_loss.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

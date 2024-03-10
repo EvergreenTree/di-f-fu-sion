@@ -19,13 +19,11 @@ from flax.training.common_utils import shard
 from huggingface_hub import create_repo, upload_folder
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import CLIPImageProcessor, CLIPTokenizer, FlaxCLIPTextModel, set_seed
+from transformers import CLIPTokenizer, FlaxCLIPTextModel, set_seed
 
-from src.models.unet_2d_condition_flax import FlaxUNet2DConditionModel
 from src.pipeline_flax_stable_diffusion import (
-    FlaxAutoencoderKL,
     FlaxPNDMScheduler,
-    FlaxStableDiffusionPipeline,
+    FlaxToyDiffusionPipeline,
     FlaxUNet2DConditionModel,
 )
 from src.schedulers.scheduling_ddpm_flax import FlaxDDPMScheduler
@@ -43,7 +41,6 @@ def parse_args():
         "--pretrained_model_name_or_path",
         type=str,
         default=None,
-        required=True,
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -62,7 +59,7 @@ def parse_args():
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default=None,
+        default="mnist",
         help=(
             "The name of the Dataset (from the HuggingFace hub) to train on (could be your own, possibly private,"
             " dataset). It can also be a path pointing to a local copy of a dataset in your filesystem,"
@@ -106,7 +103,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="sd-model-finetuned",
+        default="sd-model",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
@@ -119,7 +116,7 @@ def parse_args():
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=32,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -184,15 +181,6 @@ def parse_args():
         help="The name of the repository to keep in sync with the local `output_dir`.",
     )
     parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="logs",
-        help=(
-            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
-        ),
-    )
-    parser.add_argument(
         "--report_to",
         type=str,
         default="tensorboard",
@@ -221,7 +209,7 @@ def parse_args():
     )
     parser.add_argument(
         "--unet_config_path",
-        default=None,
+        default="unet-config-small.json",
         help="If specified, re-initialize the unet with the given config (Optional)",
     )
     parser.add_argument(
@@ -243,7 +231,7 @@ def parse_args():
 
 
 dataset_name_mapping = {
-    "lambdalabs/pokemon-blip-captions": ("image", "text"),
+    "mnist": ("image", "label"),
 }
 
 
@@ -315,47 +303,18 @@ def main():
             raise ValueError(
                 f"--image_column' value '{args.image_column}' needs to be one of: {', '.join(column_names)}"
             )
-    # if args.caption_column is None:
-    #     caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
-    # else:
-    #     caption_column = args.caption_column
-    #     if caption_column not in column_names:
-    #         raise ValueError(
-    #             f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
-    #         )
-
-    # Preprocessing the datasets.
-    # We need to tokenize input captions and transform the images.
-    # def tokenize_captions(examples, is_train=True):
-    #     captions = []
-    #     for caption in examples[caption_column]:
-    #         if isinstance(caption, str):
-    #             captions.append(caption)
-    #         elif isinstance(caption, (list, np.ndarray)):
-    #             # take a random caption if there are multiple
-    #             captions.append(random.choice(caption) if is_train else caption[0])
-    #         else:
-    #             raise ValueError(
-    #                 f"Caption column `{caption_column}` should contain either strings or lists of strings."
-    #             )
-    #     inputs = tokenizer(captions, max_length=tokenizer.model_max_length, padding="do_not_pad", truncation=True)
-    #     input_ids = inputs.input_ids
-    #     return input_ids
 
     train_transforms = transforms.Compose(
         [
             transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
-            transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
         ]
     )
 
     def preprocess_train(examples):
-        images = [image.convert("RGB") for image in examples[image_column]]
+        images = [image.convert("L") for image in examples[image_column]]
         examples["pixel_values"] = [train_transforms(image) for image in images]
-        # examples["input_ids"] = tokenize_captions(examples)
 
         return examples
 
@@ -367,14 +326,9 @@ def main():
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        # input_ids = [example["input_ids"] for example in examples]
 
-        # padded_tokens = tokenizer.pad(
-        #     {"input_ids": input_ids}, padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt"
-        # )
         batch = {
             "pixel_values": pixel_values,
-            # "input_ids": padded_tokens.input_ids,
         }
         batch = {k: v.numpy() for k, v in batch.items()}
 
@@ -391,30 +345,12 @@ def main():
     elif args.mixed_precision == "bf16":
         weight_dtype = jnp.bfloat16
 
-    # Load models and create wrapper for stable diffusion
-    # tokenizer = CLIPTokenizer.from_pretrained(
-    #     args.pretrained_model_name_or_path,
-    #     from_pt=args.from_pt,
-    #     revision=args.revision,
-    #     subfolder="tokenizer",
-    # )
-    # text_encoder = FlaxCLIPTextModel.from_pretrained(
-    #     args.pretrained_model_name_or_path,
-    #     from_pt=args.from_pt,
-    #     revision=args.revision,
-    #     subfolder="text_encoder",
-    #     dtype=weight_dtype,
-    # )
+
     tokenizer = text_encoder = None
-    vae, vae_params = FlaxAutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path,
-        from_pt=args.from_pt,
-        revision=args.revision,
-        subfolder="vae",
-        dtype=weight_dtype,
-    )
+    vae =  vae_params = None
     rng = jax.random.PRNGKey(args.seed)
     if args.unet_config_path:
+        # overrides pretrained config
         config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
         unet = FlaxUNet2DConditionModel.from_config(
             config,
@@ -424,7 +360,7 @@ def main():
         rng, key = jax.random.split(rng)
         unet_params = unet.init_weights(key)
     else:
-        # raise NotImplementedError("Fine-tuning still needs some work.")
+        assert args.pretrained_model_name_or_path is not None, "Please specify pretrained model."
         unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
             args.pretrained_model_name_or_path,
             from_pt=args.from_pt,
@@ -447,8 +383,6 @@ def main():
 
     if args.lr_scheduler == "constant":
         constant_scheduler = optax.constant_schedule(args.learning_rate)
-    elif args.lr_scheduler == "warmup_exponential_decay":
-        optax.warmup_exponential_decay_schedule(init_value, peak_value, warmup_steps, transition_steps, decay_rate, transition_begin=0, staircase=False, end_value=None)
     else:
         raise NotImplementedError
 
@@ -476,22 +410,18 @@ def main():
     train_rngs = jax.random.split(rng, jax.local_device_count())
 
     def train_step(state, text_encoder_params, vae_params, batch, train_rng):
-        dropout_rng, sample_rng, new_train_rng = jax.random.split(train_rng, 3)
+        sample_rng, new_train_rng = jax.random.split(train_rng, 2)
 
         def compute_loss(params):
-            # Convert images to latent space
-            vae_outputs = vae.apply(
-                {"params": vae_params}, batch["pixel_values"], deterministic=True, method=vae.encode
-            )
-            latents = vae_outputs.latent_dist.sample(sample_rng)
+            latents =  batch["pixel_values"]
             # (NHWC) -> (NCHW)
-            latents = jnp.transpose(latents, (0, 3, 1, 2))
-            latents = latents * vae.config.scaling_factor
+            # latents = jnp.transpose(latents, (0, 3, 1, 2))
 
             # Sample noise that we'll add to the latents
             noise_rng, timestep_rng = jax.random.split(sample_rng)
             noise = jax.random.normal(noise_rng, latents.shape)
             # Sample a random timestep for each image
+            # TODO: log-normal importance sampling
             bsz = latents.shape[0]
             timesteps = jax.random.randint(
                 timestep_rng,
@@ -504,12 +434,6 @@ def main():
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(noise_scheduler_state, latents, noise, timesteps)
 
-            # Get the text embedding for conditioning
-            # encoder_hidden_states = text_encoder(
-            #     batch["input_ids"],
-            #     params=text_encoder_params,
-            #     train=False,
-            # )[0]
             encoder_hidden_states = None
 
             # Predict the noise residual and compute loss
@@ -546,7 +470,6 @@ def main():
 
     # Replicate the train state on each device
     state = jax_utils.replicate(state)
-    # text_encoder_params = jax_utils.replicate(text_encoder.params)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
 
@@ -557,42 +480,30 @@ def main():
                 beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
             )
             safety_checker = None
-            pipeline = FlaxStableDiffusionPipeline(
-                text_encoder=text_encoder,
-                vae=vae,
+            pipeline = FlaxToyDiffusionPipeline(
                 unet=unet,
-                tokenizer=tokenizer,
                 scheduler=scheduler,
-                safety_checker=safety_checker,
-                feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
             )
             # save 
             from flax.jax_utils import replicate
             unet_params = replicate(state.params)
             params = {
-                    "text_encoder": get_params_to_save(text_encoder_params),
                     "vae": get_params_to_save(vae_params),
                     "unet": get_params_to_save(unet_params),
-                    # "safety_checker": safety_checker.params,
                 }
             pipeline.save_pretrained(
                 args.output_dir,
                 params=params,
             )
             from flax.training.common_utils import shard
-            prompt = ""
-            prng_seed = jax.random.PRNGKey(0)
+            prng_seed = jax.random.PRNGKey(23)
             num_inference_steps = 50
             num_samples = jax.device_count()
-            prompt = [prompt]
-            prompt_ids = pipeline.prepare_inputs(prompt)
-            # shard inputs and rng
-            # prng_seed = jax.random.split(prng_seed, jax.device_count())
-            # prompt_ids = shard(prompt_ids)
+            prompt_ids = jnp.zeros((num_samples,1))
             images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
             images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
             images[0].resize((256, 256)).save('snapshot.png')
-            # del unet_params
+            del params, unet_params
 
     import signal
     signal.signal(signal.SIGUSR1, sow)
@@ -648,23 +559,16 @@ def main():
             beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
         )
         safety_checker = None
-        pipeline = FlaxStableDiffusionPipeline(
-            text_encoder=text_encoder,
-            vae=vae,
+        pipeline = FlaxToyDiffusionPipeline(
             unet=unet,
-            tokenizer=tokenizer,
             scheduler=scheduler,
-            safety_checker=safety_checker,
-            feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
         )
 
         pipeline.save_pretrained(
             args.output_dir,
             params={
-                "text_encoder": get_params_to_save(text_encoder_params),
                 "vae": get_params_to_save(vae_params),
                 "unet": get_params_to_save(state.params),
-                # "safety_checker": safety_checker.params,
             },
         )
 
@@ -675,6 +579,11 @@ def main():
                 commit_message="End of training",
                 ignore_patterns=["step_*", "epoch_*"],
             )
+        R="\n".join([str(jax_utils.unreplicate(metric)['loss']) for metric in train_metrics])
+        f = open('train_loss.csv','w')
+        f.write(R)
+        f.close()
+        
 
     
 
