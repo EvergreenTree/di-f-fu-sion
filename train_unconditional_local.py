@@ -439,9 +439,9 @@ def main():
                     # return x[...,:x.shape[-1],:]
                     return jnp.eye(x.shape[-1])
             return x
-        if pipeline.unet.config.cross_attention_dim > 0:
+        if unet.config.cross_attention_dim > 0:
             print("Pruning cross-attention matrices to force the conditional model to be unconditional")
-            pipeline.unet.config.cross_attention_dim = 0 # save config to be compatible for loading later
+            unet.config.cross_attention_dim = 0 # save config to be compatible for loading later
             unet_params = jax.tree_map(prune, unet_params)
 
     # Optimization
