@@ -13,8 +13,6 @@ python3 train_unconditional_local.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
   --resolution=256 --center_crop --random_flip --seed 23\
-  --train_batch_size=1 \
-  --mixed_precision="no" \
   --max_train_steps=3000 \
   --learning_rate=1e-8 --scale_lr \
   --output_dir="sd-church-unconditional" 
@@ -22,4 +20,17 @@ python3 train_unconditional_local.py \
   #--learning_rate=1e-4, 1e-6
  # --unet_config_path="unet-config-unconditional.json"
 
+```
+
+## Quickly train a toy
+```
+export DATASET_NAME="mnist"
+
+python3 train_toy_local.py \
+  --dataset_name=$DATASET_NAME \
+  --resolution=32 --seed 23\
+  --max_train_steps=7500 \
+  --learning_rate=1e-4 --scale_lr \
+  --output_dir="sd-mnist" \
+   --unet_config_path="unet-config-small.json"
 ```
