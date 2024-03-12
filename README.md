@@ -7,19 +7,19 @@ Self-contained and (mostly) minimal training and model fusion of latent diffusio
 ## Example training command
 ```
 export MODEL_NAME="$HOME/.cache/huggingface/hub/models--duongna--stable-diffusion-v1-4-flax/snapshots/6f9644eae775b7b50d0031a74b7d8d974f398e26/"
-export DATASET_NAME="tglcourse/lsun_church_train"
-export DATASET_NAME="pcuenq/lsun-bedrooms"
-
+export DATASET_NAME="Norod78/microsoft-fluentui-emoji-512-whitebg"
+export DATASET_NAME="imagenet-1k"
+export DATASET_NAME="teticio/audio-diffusion-512"
+export DATASET_NAME="conorcl/portraits-512"
 
 python3 train_unconditional_local.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
-  --resolution=256 --center_crop --random_flip --seed 23\
+  --resolution=512 --center_crop --random_flip --seed 37 \
+  --train_batch_size=1 \
   --max_train_steps=10000 \
   --learning_rate=1e-6 --scale_lr \
-  --output_dir="sd-church-unconditional" \
-  --unet_config_path="unet-config-small.json"
-
+  --output_dir="sd-portraits" 
 ```
 
 ## Quickly train a toy
