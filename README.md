@@ -28,9 +28,8 @@ export DATASET_NAME="mnist"
 python3 train_toy_local.py \
   --dataset_name=$DATASET_NAME \
   --resolution=32 --seed 23\
-  --max_train_steps=7500 \
-  --mixed_precision="bf16" \
-  --learning_rate=1e-4 --scale_lr \
+  --max_train_steps=15000 \
+  --learning_rate=1e-6 --scale_lr \
   --output_dir="sd-mnist" \
-  --unet_config_path="unet-config-small.json"
+  --unet_config_path="unet-config-mnist.json"
 ```
