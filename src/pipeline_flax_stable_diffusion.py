@@ -123,6 +123,7 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         super().__init__()
         self.dtype = dtype
 
+        # # disable safety checker
         # if safety_checker is None:
         #     logger.warning(
         #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
@@ -479,7 +480,7 @@ def unshard(x: jnp.ndarray):
 class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
     def _generate(
         self,
-        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
+        prompt_ids: int, # supporting unconditional generation: set this variable to batch_size.
         params: Union[Dict, FrozenDict],
         prng_seed: jax.Array,
         num_inference_steps: int,
@@ -493,27 +494,9 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
         # get prompt text embeddings
-        # support unconditional generation
-        if len(prompt_ids.shape) <= 2:
-            prompt_embeds = negative_prompt_embeds = context = None
-            batch_size = prompt_ids.shape[0]
-        else:
-            prompt_embeds = self.text_encoder(prompt_ids, params=params["text_encoder"])[0]
-
-            # TODO: currently it is assumed `do_classifier_free_guidance = guidance_scale > 1.0`
-            # implement this conditional `do_classifier_free_guidance = guidance_scale > 1.0`
-            batch_size = prompt_ids.shape[0]
-
-            max_length = prompt_ids.shape[-1]
-
-            if neg_prompt_ids is None:
-                uncond_input = self.tokenizer(
-                    [""] * batch_size, padding="max_length", max_length=max_length, return_tensors="np"
-                ).input_ids
-            else:
-                uncond_input = neg_prompt_ids
-            negative_prompt_embeds = self.text_encoder(uncond_input, params=params["text_encoder"])[0]
-            context = jnp.concatenate([negative_prompt_embeds, prompt_embeds])
+        # Support unconditional generation
+        context = None
+        batch_size = prompt_ids
 
         # Ensure model output will be `float32` before going into the scheduler
         guidance_scale = jnp.array([guidance_scale], dtype=jnp.float32)
@@ -553,6 +536,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
                 jnp.array(timestep, dtype=jnp.int32),
                 encoder_hidden_states=context,
             ).sample
+
             # perform guidance
             if context is not None:
                 # get the current timestep of the scheduler
@@ -585,7 +569,89 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
         return image
 
 
+    def __call__(
+        self,
+        prompt_ids: int,
+        params: Union[Dict, FrozenDict],
+        prng_seed: jax.Array,
+        num_inference_steps: int = 50,
+        height: Optional[int] = 512,
+        width: Optional[int] = 512,
+        guidance_scale: Union[float, jnp.ndarray] = 7.5,
+        latents: jnp.ndarray = None,
+        neg_prompt_ids: jnp.ndarray = None,
+        return_dict: bool = True,
+        jit: bool = False,
+    ):
+
+        if jit:
+            images = _p_generate_unconditional(
+                self,
+                prompt_ids,
+                params,
+                prng_seed,
+                num_inference_steps,
+                height,
+                width,
+                guidance_scale,
+                latents,
+                neg_prompt_ids,
+            )
+        else:
+            images = self._generate(
+                prompt_ids,
+                params,
+                prng_seed,
+                num_inference_steps,
+                height,
+                width,
+                guidance_scale,
+                latents,
+                neg_prompt_ids,
+            )
+
+        images = np.asarray(images)
+        has_nsfw_concept = False
+
+        if not return_dict:
+            return (images, has_nsfw_concept)
+
+        return FlaxStableDiffusionPipelineOutput(images=images, nsfw_content_detected=has_nsfw_concept)
+
+# Redefining this static method to remove parallizing condition (prompt_id)
+@partial(
+    jax.pmap,
+    in_axes=(None, None, 0, 0, None, None, None, None, None, None),
+    static_broadcasted_argnums=(0, 1, 4, 5, 6, 7, 8, 9),
+    backend="tpu",
+)
+def _p_generate_unconditional(
+    pipe,
+    prompt_ids,
+    params,
+    prng_seed,
+    num_inference_steps,
+    height,
+    width,
+    guidance_scale,
+    latents,
+    neg_prompt_ids,
+):
+    return pipe._generate(
+        prompt_ids,
+        params,
+        prng_seed,
+        num_inference_steps,
+        height,
+        width,
+        guidance_scale,
+        latents,
+        neg_prompt_ids,
+    )
+
+
 class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
+    # simplify components, removing vae, text_encoder, etc.
     def __init__(
         self,
         unet,

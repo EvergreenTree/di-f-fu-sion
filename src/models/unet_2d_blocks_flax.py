@@ -58,6 +58,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
     split_head_dim: bool = False
     dtype: jnp.dtype = jnp.float32
     transformer_layers_per_block: int = 1
+    act_fn: str = "silu"
 
     def setup(self):
         resnets = []
@@ -133,6 +134,7 @@ class FlaxDownBlock2D(nn.Module):
     num_layers: int = 1
     add_downsample: bool = True
     dtype: jnp.dtype = jnp.float32
+    act_fn: str = "silu"
 
     def setup(self):
         resnets = []
@@ -206,6 +208,7 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
     split_head_dim: bool = False
     dtype: jnp.dtype = jnp.float32
     transformer_layers_per_block: int = 1
+    act_fn: str = "silu"
 
     def setup(self):
         resnets = []
@@ -286,6 +289,7 @@ class FlaxUpBlock2D(nn.Module):
     num_layers: int = 1
     add_upsample: bool = True
     dtype: jnp.dtype = jnp.float32
+    act_fn: str = "silu"
 
     def setup(self):
         resnets = []
@@ -299,6 +303,7 @@ class FlaxUpBlock2D(nn.Module):
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn=self.act_fn,
             )
             resnets.append(res_block)
 
@@ -353,6 +358,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
     split_head_dim: bool = False
     dtype: jnp.dtype = jnp.float32
     transformer_layers_per_block: int = 1
+    act_fn: str = "silu"
 
     def setup(self):
         # there is always at least one resnet

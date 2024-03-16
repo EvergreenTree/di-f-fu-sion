@@ -58,18 +58,20 @@ class FlaxDownsample2D(nn.Module):
         # hidden_states = jnp.pad(hidden_states, pad_width=pad)
         hidden_states = self.conv(hidden_states)
         return hidden_states
-
+    
 
 class FlaxResnetBlock2D(nn.Module):
     in_channels: int
     out_channels: int = None
     dropout_prob: float = 0.0
     use_nin_shortcut: bool = None
+    act_fn: str = "silu"
     dtype: jnp.dtype = jnp.float32
 
     def setup(self):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
 
+        self.act = nn.swish if self.act_fn == "silu" else cosilu
         self.norm1 = nn.GroupNorm(num_groups=32, epsilon=1e-5)
         self.conv1 = nn.Conv(
             out_channels,
@@ -81,7 +83,7 @@ class FlaxResnetBlock2D(nn.Module):
 
         self.time_emb_proj = nn.Dense(out_channels, dtype=self.dtype)
 
-        self.norm2 = nn.GroupNorm(num_groups=32, epsilon=1e-5)
+        self.norm2 = nn.GroupNorm(num_groups=32, epsilon=1e-5) 
         self.dropout = nn.Dropout(self.dropout_prob)
         self.conv2 = nn.Conv(
             out_channels,
@@ -106,15 +108,15 @@ class FlaxResnetBlock2D(nn.Module):
     def __call__(self, hidden_states, temb, deterministic=True):
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = nn.swish(hidden_states)
+        hidden_states = self.act(hidden_states)
         hidden_states = self.conv1(hidden_states)
 
-        temb = self.time_emb_proj(nn.swish(temb))
+        temb = self.time_emb_proj(self.act(temb))
         temb = jnp.expand_dims(jnp.expand_dims(temb, 1), 1)
         hidden_states = hidden_states + temb
 
         hidden_states = self.norm2(hidden_states)
-        hidden_states = nn.swish(hidden_states)
+        hidden_states = self.act(hidden_states)
         hidden_states = self.dropout(hidden_states, deterministic)
         hidden_states = self.conv2(hidden_states)
 
