@@ -123,6 +123,7 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         super().__init__()
         self.dtype = dtype
 
+        # # disable safety checker
         # if safety_checker is None:
         #     logger.warning(
         #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
@@ -617,11 +618,12 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
 
         return FlaxStableDiffusionPipelineOutput(images=images, nsfw_content_detected=has_nsfw_concept)
 
-# Redefining this static method just to unparallalize prompt_id...
+# Redefining this static method to remove parallizing condition (prompt_id)
 @partial(
     jax.pmap,
     in_axes=(None, None, 0, 0, None, None, None, None, None, None),
     static_broadcasted_argnums=(0, 1, 4, 5, 6, 7, 8, 9),
+    backend="tpu",
 )
 def _p_generate_unconditional(
     pipe,
@@ -648,8 +650,8 @@ def _p_generate_unconditional(
     )
 
 
-
 class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
+    # simplify components, removing vae, text_encoder, etc.
     def __init__(
         self,
         unet,

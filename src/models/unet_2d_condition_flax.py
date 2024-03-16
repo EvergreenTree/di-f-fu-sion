@@ -125,6 +125,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     addition_time_embed_dim: Optional[int] = None
     addition_embed_type_num_heads: int = 64
     projection_class_embeddings_input_dim: Optional[int] = None
+    act_fn: str = "silu"
 
     def init_weights(self, rng: jax.Array) -> FrozenDict:
         # init input tensors
@@ -238,6 +239,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     use_memory_efficient_attention=self.use_memory_efficient_attention,
                     split_head_dim=self.split_head_dim,
                     dtype=self.dtype,
+                    # act_fn=self.act_fn,
                 )
             else:
                 down_block = FlaxDownBlock2D(
@@ -262,6 +264,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
             use_memory_efficient_attention=self.use_memory_efficient_attention,
             split_head_dim=self.split_head_dim,
             dtype=self.dtype,
+            act_fn=self.act_fn,
         )
 
         # up

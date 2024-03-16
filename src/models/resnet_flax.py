@@ -58,15 +58,7 @@ class FlaxDownsample2D(nn.Module):
         # hidden_states = jnp.pad(hidden_states, pad_width=pad)
         hidden_states = self.conv(hidden_states)
         return hidden_states
-
-
-# def cosilu(x):
-#     x1 = x[...:1,:,:]
-#     x_1 = x[...1:,:,:]
-#     mask = x1/jnp.linalg.norm(x_1,keepdims=True)
-#     scaled_mask = nn.sigmoid(mask)
-#     return jnp.concatenate([x1,scaled_mask*x_1],axis=-3)
-
+    
 
 class FlaxResnetBlock2D(nn.Module):
     in_channels: int
@@ -80,7 +72,7 @@ class FlaxResnetBlock2D(nn.Module):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
 
         self.act = nn.swish if self.act_fn == "silu" else cosilu
-        self.norm1 = nn.GroupNorm(num_groups=32, epsilon=1e-5)
+        self.norm1 = nn.LayerNorm() # nn.GroupNorm(num_groups=32, epsilon=1e-5)
         self.conv1 = nn.Conv(
             out_channels,
             kernel_size=(3, 3),
@@ -91,7 +83,7 @@ class FlaxResnetBlock2D(nn.Module):
 
         self.time_emb_proj = nn.Dense(out_channels, dtype=self.dtype)
 
-        self.norm2 = nn.GroupNorm(num_groups=32, epsilon=1e-5)
+        self.norm2 = nn.LayerNorm() # nn.GroupNorm(num_groups=32, epsilon=1e-5)
         self.dropout = nn.Dropout(self.dropout_prob)
         self.conv2 = nn.Conv(
             out_channels,
