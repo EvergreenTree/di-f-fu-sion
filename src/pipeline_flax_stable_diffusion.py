@@ -667,7 +667,7 @@ class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
 
     def _generate(
         self,
-        prompt_ids: jnp.array, # supportting unconditional generation: jnp.zeros((batch_size,))
+        prompt_ids: int, # supportting unconditional generation: batch_size
         params: Union[Dict, FrozenDict],
         prng_seed: jax.Array,
         num_inference_steps: int,
@@ -677,12 +677,8 @@ class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
         latents: Optional[jnp.ndarray] = None,
         neg_prompt_ids: Optional[jnp.ndarray] = None,
     ):
-
-        # get prompt text embeddings
-        # support unconditional generation
-        assert len(prompt_ids.shape) <= 2, "placeholders must have shape (batchsize, 1)"
-        prompt_embeds = negative_prompt_embeds = context = None
-        batch_size = prompt_ids.shape[0]
+        context = None
+        batch_size = prompt_ids
 
         # Ensure model output will be `float32` before going into the scheduler
         guidance_scale = jnp.array([guidance_scale], dtype=jnp.float32)
@@ -693,9 +689,9 @@ class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
             height ,
             width ,
         )
-        prng_seed, rng = jax.random.split(prng_seed, 2)
+        # prng_seed, rng = jax.random.split(prng_seed, 2)
         if latents is None:
-            latents = jax.random.normal(rng, shape=latents_shape, dtype=jnp.float32)
+            latents = jax.random.normal(prng_seed, shape=latents_shape, dtype=jnp.float32)
         else:
             if latents.shape != latents_shape:
                 raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
