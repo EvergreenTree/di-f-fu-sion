@@ -322,6 +322,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
             dtype=self.dtype,
         )
 
+    @jax.jit
     def __call__(
         self,
         sample: jnp.ndarray,

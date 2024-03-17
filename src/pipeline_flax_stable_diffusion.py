@@ -43,7 +43,7 @@ from .pipeline_output import FlaxStableDiffusionPipelineOutput
 # logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 # Set to True to use python for loop instead of jax.fori_loop for easier debugging
-DEBUG = True
+DEBUG = False
 
 # EXAMPLE_DOC_STRING = """
 #     Examples:
