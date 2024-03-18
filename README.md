@@ -6,7 +6,7 @@ Self-contained and (mostly) minimal training and model fusion of latent diffusio
 
 ## Example training command
 Selected datasets: `conorcl/portraits-512` `teticio/audio-diffusion-512` `Norod78/microsoft-fluentui-emoji-512-whitebg` `poorguys/TW-Kai_2_Chong_Xi_Small_Seal_all_512`
-Example model path: "$HOME/.cache/huggingface/hub/models--duongna--stable-diffusion-v1-4-flax/snapshots/6f9644eae775b7b50d0031a74b7d8d974f398e26/" 
+Example pre-trained model path: "$HOME/.cache/huggingface/hub/models--duongna--stable-diffusion-v1-4-flax/snapshots/6f9644eae775b7b50d0031a74b7d8d974f398e26/" 
 ```
 python3 train_unconditional_local.py \
   --pretrained_model_name_or_path="sd-portraits" \

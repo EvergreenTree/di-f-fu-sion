@@ -30,10 +30,6 @@ from src.pipeline_flax_stable_diffusion import (
 )
 from src.schedulers.scheduling_ddpm_flax import FlaxDDPMScheduler
 
-
-# Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-# # check_min_version("0.25.0.dev0")  
-
 logger = logging.getLogger(__name__)
 
 
@@ -229,6 +225,12 @@ def parse_args():
         action="store_true",
         help="Do not train, save.",
     )
+    parser.add_argument(
+        "--from_scratch",
+        action="store_true",
+        help="Clear model memory.",
+    )
+
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -259,17 +261,13 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-    # Setup logging, we only want one process per machine to log things on the screen.
     logger.setLevel(logging.INFO if jax.process_index() == 0 else logging.ERROR)
     if jax.process_index() == 0:
         transformers.utils.logging.set_verbosity_info()
     else:
         transformers.utils.logging.set_verbosity_error()
-
     if args.seed is not None:
         set_seed(args.seed)
-
-    # Handle the repository creation
     if jax.process_index() == 0:
         if args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
@@ -278,14 +276,7 @@ def main():
             repo_id = create_repo(
                 repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
             ).repo_id
-
-    # Get the datasets: you can either provide your own training and evaluation files (see below)
-    # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
-
-    # In distributed training, the load_dataset function guarantees that only one local process can concurrently
-    # download the dataset.
     if args.dataset_name is not None:
-        # Downloading and loading a dataset from the hub.
         dataset = load_dataset(
             args.dataset_name, args.dataset_config_name, cache_dir=args.cache_dir, data_dir=args.train_data_dir
         )
@@ -298,14 +289,7 @@ def main():
             data_files=data_files,
             cache_dir=args.cache_dir,
         )
-        # See more about loading custom images at
-        # https://huggingface.co/docs/datasets/v2.4.0/en/image_load#imagefolder
-
-    # Preprocessing the datasets.
-    # We need to tokenize inputs and targets.
     column_names = dataset["train"].column_names
-
-    # 6. Get the column names for input/target.
     dataset_columns = dataset_name_mapping.get(args.dataset_name, None)
     if args.image_column is None:
         image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
@@ -314,34 +298,7 @@ def main():
         if image_column not in column_names:
             raise ValueError(
                 f"--image_column' value '{args.image_column}' needs to be one of: {', '.join(column_names)}"
-            )
-    # if args.caption_column is None:
-    #     caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
-    # else:
-    #     caption_column = args.caption_column
-    #     if caption_column not in column_names:
-    #         raise ValueError(
-    #             f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
-    #         )
-
-    # Preprocessing the datasets.
-    # We need to tokenize input captions and transform the images.
-    # def tokenize_captions(examples, is_train=True):
-    #     captions = []
-    #     for caption in examples[caption_column]:
-    #         if isinstance(caption, str):
-    #             captions.append(caption)
-    #         elif isinstance(caption, (list, np.ndarray)):
-    #             # take a random caption if there are multiple
-    #             captions.append(random.choice(caption) if is_train else caption[0])
-    #         else:
-    #             raise ValueError(
-    #                 f"Caption column `{caption_column}` should contain either strings or lists of strings."
-    #             )
-    #     inputs = tokenizer(captions, max_length=tokenizer.model_max_length, padding="do_not_pad", truncation=True)
-    #     input_ids = inputs.input_ids
-    #     return input_ids
-
+            )   
     train_transforms = transforms.Compose(
         [
             transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -351,35 +308,21 @@ def main():
             transforms.Normalize([0.5], [0.5]),
         ]
     )
-
     def preprocess_train(examples):
         images = [image.convert("RGB") for image in examples[image_column]]
         examples["pixel_values"] = [train_transforms(image) for image in images]
-        # examples["input_ids"] = tokenize_captions(examples)
-
         return examples
-
     if args.max_train_samples is not None:
         dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
-        # Set the training transforms
     train_dataset = dataset["train"].with_transform(preprocess_train)
-
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        # input_ids = [example["input_ids"] for example in examples]
-
-        # padded_tokens = tokenizer.pad(
-        #     {"input_ids": input_ids}, padding="max_length", max_length=tokenizer.model_max_length, return_tensors="pt"
-        # )
         batch = {
             "pixel_values": pixel_values,
-            # "input_ids": padded_tokens.input_ids,
         }
         batch = {k: v.numpy() for k, v in batch.items()}
-
         return batch
-
     total_train_batch_size = args.train_batch_size * jax.local_device_count()
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=total_train_batch_size, drop_last=True
@@ -390,21 +333,6 @@ def main():
         weight_dtype = jnp.float16
     elif args.mixed_precision == "bf16":
         weight_dtype = jnp.bfloat16
-
-    # Load models and create wrapper for stable diffusion
-    # tokenizer = CLIPTokenizer.from_pretrained(
-    #     args.pretrained_model_name_or_path,
-    #     from_pt=args.from_pt,
-    #     revision=args.revision,
-    #     subfolder="tokenizer",
-    # )
-    # text_encoder = FlaxCLIPTextModel.from_pretrained(
-    #     args.pretrained_model_name_or_path,
-    #     from_pt=args.from_pt,
-    #     revision=args.revision,
-    #     subfolder="text_encoder",
-    #     dtype=weight_dtype,
-    # )
     tokenizer = text_encoder = None
     vae, vae_params = FlaxAutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -414,32 +342,35 @@ def main():
         dtype=weight_dtype,
     )
     rng = jax.random.PRNGKey(args.seed)
+
+    unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
+        args.pretrained_model_name_or_path,
+        from_pt=args.from_pt,
+        revision=args.revision,
+        subfolder="unet",
+        dtype=weight_dtype,
+    )
     if args.unet_config_path:
         config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
+        del unet
         unet = FlaxUNet2DConditionModel.from_config(
             config,
             revision=args.revision,
             dtype=weight_dtype,
         )
+    if args.from_scratch:
         rng, key = jax.random.split(rng)
+        del unet_params
         unet_params = unet.init_weights(key)
     else:
-        # raise NotImplementedError("Fine-tuning still needs some work.")
-        unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
-            args.pretrained_model_name_or_path,
-            from_pt=args.from_pt,
-            revision=args.revision,
-            subfolder="unet",
-            dtype=weight_dtype,
-        )
-        # in case of cross attention with shape [768, C], turn it into shape [C,C]
+        # Roughly adapt to pre-trained weights. In the cross-attention case with shape [768, C], prune it to shape [C,C].
+        # in this case, unet_config_path must be the same as pre-trained model.
         def prune(x):
             if len(x.shape) > 1:
                 if x.shape[-2] == 768:
-                    # return x[...,:x.shape[-1],:]
-                    return jnp.eye(x.shape[-1])
+                    return jnp.eye(x.shape[-1]) # or return x[...,:x.shape[-1],:], which does not work for x.shape[-1] > C
             return x
-        if unet.config.cross_attention_dim > 0:
+        if unet.cross_attention_dim > 0:
             print("Pruning cross-attention matrices to force the conditional model to be unconditional")
             unet.config.cross_attention_dim = 0 
             unet.cross_attention_dim = 0 # save config to be compatible for loading later
@@ -448,14 +379,12 @@ def main():
     # Optimization
     if args.scale_lr:
         args.learning_rate = args.learning_rate * total_train_batch_size
-
     if args.lr_scheduler == "constant":
         constant_scheduler = optax.constant_schedule(args.learning_rate)
-    elif args.lr_scheduler == "warmup_exponential_decay":
+    elif args.lr_scheduler == "warmup_exponential_decay": # placeholder for more sophisticated optimizers
         optax.warmup_exponential_decay_schedule(init_value, peak_value, warmup_steps, transition_steps, decay_rate, transition_begin=0, staircase=False, end_value=None)
     else:
         raise NotImplementedError
-
     adamw = optax.adamw(
         learning_rate=constant_scheduler,
         b1=args.adam_beta1,
@@ -463,20 +392,17 @@ def main():
         eps=args.adam_epsilon,
         weight_decay=args.adam_weight_decay,
     )
-
     optimizer = optax.chain(
         optax.clip_by_global_norm(args.max_grad_norm),
         adamw,
     )
-
     state = train_state.TrainState.create(apply_fn=unet.__call__, params=unet_params, tx=optimizer)
-
     noise_scheduler = FlaxDDPMScheduler(
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000
     )
     noise_scheduler_state = noise_scheduler.create_state()
 
-    # Initialize our training
+    # Initialization
     train_rngs = jax.random.split(rng, jax.local_device_count())
 
     def train_step(state, text_encoder_params, vae_params, batch, train_rng):
@@ -508,12 +434,6 @@ def main():
             # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(noise_scheduler_state, latents, noise, timesteps)
 
-            # Get the text embedding for conditioning
-            # encoder_hidden_states = text_encoder(
-            #     batch["input_ids"],
-            #     params=text_encoder_params,
-            #     train=False,
-            # )[0]
             encoder_hidden_states = None
 
             # Predict the noise residual and compute loss
@@ -550,11 +470,10 @@ def main():
 
     # Replicate the train state on each device
     state = jax_utils.replicate(state)
-    # text_encoder_params = jax_utils.replicate(text_encoder.params)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
 
-    # Enable snapshot
+    # Enable snapshot (experimental)
     def sow(*args, **kwargs):
         if jax.process_index() == 0:
             scheduler = FlaxPNDMScheduler(
