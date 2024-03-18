@@ -11,7 +11,7 @@
     1280,
     1280
   ],
-  "cross_attention_dim": 768,
+  "cross_attention_dim": 0,
   "down_block_types": [
     "CrossAttnDownBlock2D",
     "CrossAttnDownBlock2D",
