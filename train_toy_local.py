@@ -377,7 +377,8 @@ def main():
             return x
         if unet.config.cross_attention_dim > 0:
             print("Pruning cross-attention matrices to force the conditional model to be unconditional")
-            unet.config.cross_attention_dim = 0 # save config to be compatible for loading later
+            unet.config.cross_attention_dim = 0 
+            unet.cross_attention_dim = 0 # save config to be compatible for loading later
             unet_params = jax.tree_map(prune, unet_params)
 
     # Optimization
