@@ -136,7 +136,7 @@ def group_colu(x, channel_axis = -1, variant = "soft", eps = 1e-7):
     group_size = num_channels // num_groups # S = C / G
 
     assert channel_axis < 0, "channel_axis must be negative" # Comply with broadcasting on first dimensions
-
+ 
     x_old_shape = x.shape
     y_old_shape = y.shape
     x_shape = x.shape[:channel_axis] + (num_groups, group_size)
