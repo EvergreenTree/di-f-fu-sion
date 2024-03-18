@@ -14,6 +14,7 @@
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from functools import partial
 
 
 class FlaxUpsample2D(nn.Module):
@@ -71,7 +72,7 @@ class FlaxResnetBlock2D(nn.Module):
     def setup(self):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
 
-        self.act = nn.swish if self.act_fn == "silu" else cosilu
+        self.act = nn.swish if self.act_fn == "silu" else group_colu
         self.norm1 = nn.GroupNorm(num_groups=32, epsilon=1e-5)
         self.conv1 = nn.Conv(
             out_channels,
@@ -111,7 +112,7 @@ class FlaxResnetBlock2D(nn.Module):
         hidden_states = self.act(hidden_states)
         hidden_states = self.conv1(hidden_states)
 
-        temb = self.time_emb_proj(self.act(temb))
+        temb = self.time_emb_proj(nn.swish(temb))
         temb = jnp.expand_dims(jnp.expand_dims(temb, 1), 1)
         hidden_states = hidden_states + temb
 
@@ -124,3 +125,42 @@ class FlaxResnetBlock2D(nn.Module):
             residual = self.conv_shortcut(residual)
 
         return hidden_states + residual
+
+@partial(jax.jit, static_argnames=['channel_axis','variant','eps'],)
+def group_colu(x, channel_axis = -1, variant = "soft", eps = 1e-7):
+    num_channels = x.shape[channel_axis]
+    y, x = x.take(jnp.arange(32), axis=channel_axis), x.take(jnp.arange(32,num_channels), axis=channel_axis)
+    num_channels = x.shape[channel_axis]
+    num_groups = y.shape[channel_axis] # number of cones
+    assert num_channels % num_groups == 0, "Input must be a multiple of number of cones"
+    group_size = num_channels // num_groups # S = C / G
+
+    assert channel_axis < 0, "channel_axis must be negative" # Comply with broadcasting on first dimensions
+
+    x_old_shape = x.shape
+    y_old_shape = y.shape
+    x_shape = x.shape[:channel_axis] + (num_groups, group_size)
+    y_shape = y.shape[:channel_axis] + (num_groups, 1)
+    if channel_axis < -1:
+        x_shape += x.shape[(channel_axis+1):] # NGSHW if channel_axis = -3
+        y_shape += y.shape[(channel_axis+1):] # NG1HW
+    x = x.reshape(x_shape)
+    y = y.reshape(y_shape)
+
+    xn = jnp.linalg.norm(x,axis=channel_axis,keepdims=True) # NG1HW, per-group norm, or the S dimension
+
+    mask = y / (xn + eps) # NG1HW
+
+    if variant == "soft": # soft project
+        scaled_mask = nn.sigmoid(mask-.5)
+    elif variant == "hard": # hard project
+        scaled_mask = mask.clip(0,1)
+    else:
+        raise NotImplementedError("variant must be soft or hard.")
+
+    x = scaled_mask * x # NGSHW
+
+    x = x.reshape(x_old_shape)
+    y = y.reshape(y_old_shape)
+
+    return jnp.concatenate([y,x],axis=channel_axis)

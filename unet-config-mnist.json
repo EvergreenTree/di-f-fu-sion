@@ -6,14 +6,12 @@
   "addition_time_embed_dim": null,
   "attention_head_dim": 32,
   "block_out_channels": [
-    64,
-    64,
-    64,
-    64
+    320,
+    320,
+    320
   ],
   "cross_attention_dim": 0,
   "down_block_types": [
-    "CrossAttnDownBlock2D",
     "CrossAttnDownBlock2D",
     "CrossAttnDownBlock2D",
     "DownBlock2D"
@@ -22,7 +20,7 @@
   "flip_sin_to_cos": true,
   "freq_shift": 0,
   "in_channels": 1,
-  "layers_per_block": 1,
+  "layers_per_block": 2,
   "num_attention_heads": null,
   "only_cross_attention": false,
   "out_channels": 1,
@@ -33,9 +31,9 @@
   "up_block_types": [
     "UpBlock2D",
     "CrossAttnUpBlock2D",
-    "CrossAttnUpBlock2D",
     "CrossAttnUpBlock2D"
   ],
   "use_linear_projection": false,
-  "use_memory_efficient_attention": false
+  "use_memory_efficient_attention": false,
+  "act_fn": "colu"
 }

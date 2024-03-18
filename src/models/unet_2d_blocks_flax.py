@@ -72,6 +72,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn=self.act_fn
             )
             resnets.append(res_block)
 
@@ -147,6 +148,7 @@ class FlaxDownBlock2D(nn.Module):
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn=self.act_fn
             )
             resnets.append(res_block)
         self.resnets = resnets
@@ -223,6 +225,7 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn = self.act_fn
             )
             resnets.append(res_block)
 
@@ -368,6 +371,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 out_channels=self.in_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn=self.act_fn,
             )
         ]
 
@@ -391,6 +395,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 out_channels=self.in_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
+                act_fn=self.act_fn,
             )
             resnets.append(res_block)
 
