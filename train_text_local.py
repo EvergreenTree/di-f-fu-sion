@@ -503,51 +503,6 @@ def main():
 
         return new_state, metrics, new_train_rng
     
-    # !EXPERIMENTAL! Enable snapshot
-    def sow(*args, **kwargs):
-        if jax.process_index() == 0:
-            scheduler = FlaxPNDMScheduler(
-                beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
-            )
-            safety_checker = None
-            pipeline = FlaxStableDiffusionPipeline(
-                text_encoder=text_encoder,
-                vae=vae,
-                unet=unet,
-                tokenizer=tokenizer,
-                scheduler=scheduler,
-                safety_checker=safety_checker,
-                feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
-            )
-            # save 
-            from flax.jax_utils import replicate
-            unet_params = replicate(state.params)
-            params = {
-                    "text_encoder": get_params_to_save(text_encoder_params),
-                    "vae": get_params_to_save(vae_params),
-                    "unet": get_params_to_save(unet_params),
-                    "safety_checker": safety_checker.params,
-                }
-            pipeline.save_pretrained(
-                args.output_dir,
-                params=params,
-            )
-            prompt = ""
-            prng_seed = jax.random.PRNGKey(0)
-            num_inference_steps = 50
-            num_samples = jax.device_count()
-            prompt = num_samples * [prompt]
-            prompt_ids = pipeline.prepare_inputs(prompt)
-            # shard inputs and rng
-            from flax.training.common_utils import shard            
-            prng_seed = jax.random.split(prng_seed, jax.device_count())
-            prompt_ids = shard(prompt_ids)
-            images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
-            images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
-            if not os.path.exists('snapshot'):
-                os.makedirs('snapshot')
-            for i, image in enumerate(images):
-                image.resize((256, 256)).save('snapshot/snapshot'+str(i)+'.png')
 
     # Create parallel version of the train step
     p_train_step = jax.pmap(train_step, "batch", donate_argnums=(0,))

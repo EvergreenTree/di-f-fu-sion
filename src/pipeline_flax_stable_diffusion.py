@@ -34,78 +34,14 @@ from .schedulers import (
     FlaxLMSDiscreteScheduler,
     FlaxPNDMScheduler,
 )
-# from ...utils import deprecate, logging, replace_example_docstring
 from .pipeline_flax_utils import FlaxDiffusionPipeline
 from .pipeline_output import FlaxStableDiffusionPipelineOutput
 # from .safety_checker_flax import FlaxStableDiffusionSafetyChecker
 
-
-# logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 # Set to True to use python for loop instead of jax.fori_loop for easier debugging
 DEBUG = False
 
-# EXAMPLE_DOC_STRING = """
-#     Examples:
-#         ```py
-#         >>> import jax
-#         >>> import numpy as np
-#         >>> from flax.jax_utils import replicate
-#         >>> from flax.training.common_utils import shard
-
-#         >>> from diffusers import FlaxStableDiffusionPipeline
-
-#         >>> pipeline, params = FlaxStableDiffusionPipeline.from_pretrained(
-#         ...     "runwayml/stable-diffusion-v1-5", revision="bf16", dtype=jax.numpy.bfloat16
-#         ... )
-
-#         >>> prompt = "a photo of an astronaut riding a horse on mars"
-
-#         >>> prng_seed = jax.random.PRNGKey(0)
-#         >>> num_inference_steps = 50
-
-#         >>> num_samples = jax.device_count()
-#         >>> prompt = num_samples * [prompt]
-#         >>> prompt_ids = pipeline.prepare_inputs(prompt)
-#         # shard inputs and rng
-
-#         >>> params = replicate(params)
-#         >>> prng_seed = jax.random.split(prng_seed, jax.device_count())
-#         >>> prompt_ids = shard(prompt_ids)
-
-#         >>> images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
-#         >>> images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
-#         ```
-# """
-
-
 class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
-    r"""
-    Flax-based pipeline for text-to-image generation using Stable Diffusion.
-
-    This model inherits from [`FlaxDiffusionPipeline`]. Check the superclass documentation for the generic methods
-    implemented for all pipelines (downloading, saving, running on a particular device, etc.).
-
-    Args:
-        vae ([`FlaxAutoencoderKL`]):
-            Variational Auto-Encoder (VAE) model to encode and decode images to and from latent representations.
-        text_encoder ([`~transformers.FlaxCLIPTextModel`]):
-            Frozen text-encoder ([clip-vit-large-patch14](https://huggingface.co/openai/clip-vit-large-patch14)).
-        tokenizer ([`~transformers.CLIPTokenizer`]):
-            A `CLIPTokenizer` to tokenize text.
-        unet ([`FlaxUNet2DConditionModel`]):
-            A `FlaxUNet2DConditionModel` to denoise the encoded image latents.
-        scheduler ([`SchedulerMixin`]):
-            A scheduler to be used in combination with `unet` to denoise the encoded image latents. Can be one of
-            [`FlaxDDIMScheduler`], [`FlaxLMSDiscreteScheduler`], [`FlaxPNDMScheduler`], or
-            [`FlaxDPMSolverMultistepScheduler`].
-        safety_checker ([`FlaxStableDiffusionSafetyChecker`]):
-            Classification module that estimates whether generated images could be considered offensive or harmful.
-            Please refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for more details
-            about a model's potential harms.
-        feature_extractor ([`~transformers.CLIPImageProcessor`]):
-            A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
-    """
 
     def __init__(
         self,
@@ -122,39 +58,6 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
     ):
         super().__init__()
         self.dtype = dtype
-
-        # # disable safety checker
-        # if safety_checker is None:
-        #     logger.warning(
-        #         f"You have disabled the safety checker for {self.__class__} by passing `safety_checker=None`. Ensure"
-        #         " that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered"
-        #         " results in services or applications open to the public. Both the diffusers team and Hugging Face"
-        #         " strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling"
-        #         " it only for use-cases that involve analyzing network behavior or auditing its results. For more"
-        #         " information, please have a look at https://github.com/huggingface/diffusers/pull/254 ."
-        #     )
-
-        # # disable versioning
-        # is_unet_version_less_0_9_0 = hasattr(unet.config, "_diffusers_version") and version.parse(
-        #     version.parse(unet.config._diffusers_version).base_version
-        # ) < version.parse("0.9.0.dev0")
-        # is_unet_sample_size_less_64 = hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
-        # if is_unet_version_less_0_9_0 and is_unet_sample_size_less_64:
-        #     deprecation_message = (
-        #         "The configuration file of the unet has set the default `sample_size` to smaller than"
-        #         " 64 which seems highly unlikely .If you're checkpoint is a fine-tuned version of any of the"
-        #         " following: \n- CompVis/stable-diffusion-v1-4 \n- CompVis/stable-diffusion-v1-3 \n-"
-        #         " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- runwayml/stable-diffusion-v1-5"
-        #         " \n- runwayml/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
-        #         " configuration file. Please make sure to update the config accordingly as leaving `sample_size=32`"
-        #         " in the config might lead to incorrect results in future versions. If you have downloaded this"
-        #         " checkpoint from the Hugging Face Hub, it would be very nice if you could open a Pull request for"
-        #         " the `unet/config.json` file"
-        #     )
-        #     # deprecate("sample_size<64", "1.0.0", deprecation_message, standard_warn=False)
-        #     new_config = dict(unet.config)
-        #     new_config["sample_size"] = 64
-        #     unet._internal_dict = FrozenDict(new_config)
 
         self.register_modules(
             vae=vae,
@@ -310,7 +213,6 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
         return image
 
-    # @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
         prompt_ids: jnp.array,
@@ -325,49 +227,6 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         return_dict: bool = True,
         jit: bool = False,
     ):
-        # r"""
-        # The call function to the pipeline for generation.
-
-        # Args:
-        #     prompt (`str` or `List[str]`, *optional*):
-        #         The prompt or prompts to guide image generation.
-        #     height (`int`, *optional*, defaults to `self.unet.config.sample_size * self.vae_scale_factor`):
-        #         The height in pixels of the generated image.
-        #     width (`int`, *optional*, defaults to `self.unet.config.sample_size * self.vae_scale_factor`):
-        #         The width in pixels of the generated image.
-        #     num_inference_steps (`int`, *optional*, defaults to 50):
-        #         The number of denoising steps. More denoising steps usually lead to a higher quality image at the
-        #         expense of slower inference.
-        #     guidance_scale (`float`, *optional*, defaults to 7.5):
-        #         A higher guidance scale value encourages the model to generate images closely linked to the text
-        #         `prompt` at the expense of lower image quality. Guidance scale is enabled when `guidance_scale > 1`.
-        #     latents (`jnp.ndarray`, *optional*):
-        #         Pre-generated noisy latents sampled from a Gaussian distribution, to be used as inputs for image
-        #         generation. Can be used to tweak the same generation with different prompts. If not provided, a latents
-        #         array is generated by sampling using the supplied random `generator`.
-        #     jit (`bool`, defaults to `False`):
-        #         Whether to run `pmap` versions of the generation and safety scoring functions.
-
-        #             <Tip warning={true}>
-
-        #             This argument exists because `__call__` is not yet end-to-end pmap-able. It will be removed in a
-        #             future release.
-
-        #             </Tip>
-
-        #     return_dict (`bool`, *optional*, defaults to `True`):
-        #         Whether or not to return a [`~pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput`] instead of
-        #         a plain tuple.
-
-        # Examples:
-
-        # Returns:
-        #     [`~pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput`] or `tuple`:
-        #         If `return_dict` is `True`, [`~pipelines.stable_diffusion.FlaxStableDiffusionPipelineOutput`] is
-        #         returned, otherwise a `tuple` is returned where the first element is a list with the generated images
-        #         and the second element is a list of `bool`s indicating whether the corresponding generated image
-        #         contains "not-safe-for-work" (nsfw) content.
-        # """
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
         width = width or self.unet.config.sample_size * self.vae_scale_factor
@@ -476,11 +335,25 @@ def unshard(x: jnp.ndarray):
     return x.reshape(num_devices * batch_size, *rest)
 
 
-
 class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
+    def __init__(
+        self,
+        vae,
+        unet,
+        scheduler,
+        dtype = jnp.float32,
+    ):
+        self.dtype=dtype
+        self.register_modules(
+            vae=vae,
+            unet=unet,
+            scheduler=scheduler,
+        )
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+
     def _generate(
         self,
-        prompt_ids: int, # supporting unconditional generation: set this variable to batch_size.
+        batch_size: int, # supporting unconditional generation: set this variable to batch_size.
         params: Union[Dict, FrozenDict],
         prng_seed: jax.Array,
         num_inference_steps: int,
@@ -496,7 +369,6 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
         # get prompt text embeddings
         # Support unconditional generation
         context = None
-        batch_size = prompt_ids
 
         # Ensure model output will be `float32` before going into the scheduler
         guidance_scale = jnp.array([guidance_scale], dtype=jnp.float32)
@@ -516,13 +388,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
 
         def loop_body(step, args):
             latents, scheduler_state = args
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            if context is not None:
-                latents_input = jnp.concatenate([latents] * 2)
-            else:
-                latents_input = latents
+            latents_input = latents
 
             t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[step]
             timestep = jnp.broadcast_to(t, latents_input.shape[0])
@@ -579,7 +445,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
         width: Optional[int] = 512,
         guidance_scale: Union[float, jnp.ndarray] = 7.5,
         latents: jnp.ndarray = None,
-        neg_prompt_ids: jnp.ndarray = None,
+        neg_prompt_ids: Optional[jnp.ndarray] = None,
         return_dict: bool = True,
         jit: bool = False,
     ):
@@ -595,7 +461,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
                 width,
                 guidance_scale,
                 latents,
-                neg_prompt_ids,
+                neg_prompt_ids
             )
         else:
             images = self._generate(
@@ -607,7 +473,7 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
                 width,
                 guidance_scale,
                 latents,
-                neg_prompt_ids,
+                neg_prompt_ids
             )
 
         images = np.asarray(images)
@@ -618,16 +484,15 @@ class FlaxUnconditionalStableDiffusionPipeline(FlaxStableDiffusionPipeline):
 
         return FlaxStableDiffusionPipelineOutput(images=images, nsfw_content_detected=has_nsfw_concept)
 
-# Redefining this static method to remove parallizing condition (prompt_id)
+# make the second argument static
 @partial(
     jax.pmap,
     in_axes=(None, None, 0, 0, None, None, None, None, None, None),
     static_broadcasted_argnums=(0, 1, 4, 5, 6, 7, 8, 9),
-    backend="tpu",
 )
 def _p_generate_unconditional(
     pipe,
-    prompt_ids,
+    batch_size,
     params,
     prng_seed,
     num_inference_steps,
@@ -635,10 +500,10 @@ def _p_generate_unconditional(
     width,
     guidance_scale,
     latents,
-    neg_prompt_ids,
+    neg_prompt_ids
 ):
     return pipe._generate(
-        prompt_ids,
+        batch_size,
         params,
         prng_seed,
         num_inference_steps,
@@ -646,12 +511,11 @@ def _p_generate_unconditional(
         width,
         guidance_scale,
         latents,
-        neg_prompt_ids,
+        neg_prompt_ids
     )
 
 
 class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
-    # simplify components, removing vae, text_encoder, etc.
     def __init__(
         self,
         unet,
@@ -675,7 +539,6 @@ class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
         width: int,
         guidance_scale: float,
         latents: Optional[jnp.ndarray] = None,
-        neg_prompt_ids: Optional[jnp.ndarray] = None,
     ):
         context = None
         batch_size = prompt_ids

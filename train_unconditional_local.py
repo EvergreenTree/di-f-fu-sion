@@ -21,11 +21,11 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPImageProcessor, CLIPTokenizer, FlaxCLIPTextModel, set_seed
 
-from src.models.unet_2d_condition_flax import FlaxUNet2DConditionModel
 from src.pipeline_flax_stable_diffusion import (
     FlaxAutoencoderKL,
     FlaxPNDMScheduler,
     FlaxStableDiffusionPipeline,
+    FlaxUnconditionalStableDiffusionPipeline,
     FlaxUNet2DConditionModel,
 )
 from src.schedulers.scheduling_ddpm_flax import FlaxDDPMScheduler
@@ -382,18 +382,30 @@ def main():
     if args.scale_lr:
         args.learning_rate = args.learning_rate * total_train_batch_size
     if args.lr_scheduler == "constant":
-        constant_scheduler = optax.constant_schedule(args.learning_rate)
-    elif args.lr_scheduler == "warmup_exponential_decay": # placeholder for more sophisticated optimizers
-        optax.warmup_exponential_decay_schedule(init_value, peak_value, warmup_steps, transition_steps, decay_rate, transition_begin=0, staircase=False, end_value=None)
+        warmup_steps = 500
+        warmup_schedule = optax.linear_schedule(
+            init_value=0.0, 
+            end_value=args.learning_rate, 
+            transition_steps=warmup_steps, 
+        )
+        constant_schedule = optax.constant_schedule(args.learning_rate)
+        schedule = optax.join_schedules(
+            schedules=[warmup_schedule, constant_schedule],
+            boundaries=[warmup_steps]
+        )
     else:
         raise NotImplementedError
+    
     adamw = optax.adamw(
-        learning_rate=constant_scheduler,
+        learning_rate=schedule,
         b1=args.adam_beta1,
         b2=args.adam_beta2,
         eps=args.adam_epsilon,
         weight_decay=args.adam_weight_decay,
     )
+    # Combine warm-up with the main schedule
+    # `warmup_steps` is used to switch from the warmup schedule to the main schedule
+    
     optimizer = optax.chain(
         optax.clip_by_global_norm(args.max_grad_norm),
         adamw,
@@ -475,53 +487,6 @@ def main():
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
 
-    # Enable snapshot (experimental)
-    def sow(*args, **kwargs):
-        if jax.process_index() == 0:
-            scheduler = FlaxPNDMScheduler(
-                beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
-            )
-            safety_checker = None
-            pipeline = FlaxStableDiffusionPipeline(
-                text_encoder=text_encoder,
-                vae=vae,
-                unet=unet,
-                tokenizer=tokenizer,
-                scheduler=scheduler,
-                safety_checker=safety_checker,
-                feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
-            )
-            # save 
-            from flax.jax_utils import replicate
-            unet_params = replicate(state.params)
-            params = {
-                    "text_encoder": get_params_to_save(text_encoder_params),
-                    "vae": get_params_to_save(vae_params),
-                    "unet": get_params_to_save(unet_params),
-                    # "safety_checker": safety_checker.params,
-                }
-            pipeline.save_pretrained(
-                args.output_dir,
-                params=params,
-            )
-            from flax.training.common_utils import shard
-            prompt = ""
-            prng_seed = jax.random.PRNGKey(0)
-            num_inference_steps = 50
-            num_samples = jax.device_count()
-            prompt = [prompt]
-            prompt_ids = pipeline.prepare_inputs(prompt)
-            # shard inputs and rng
-            # prng_seed = jax.random.split(prng_seed, jax.device_count())
-            # prompt_ids = shard(prompt_ids)
-            images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
-            images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
-            images[0].resize((256, 256)).save('snapshot.png')
-            # del unet_params
-
-    import signal
-    signal.signal(signal.SIGUSR1, sow)
-
     # Train!
     num_update_steps_per_epoch = math.ceil(len(train_dataloader))
 
@@ -531,68 +496,78 @@ def main():
 
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
-    if not args.dry_run:
-        logger.info("***** Running training *****")
-        logger.info(f"  Num examples = {len(train_dataset)}")
-        logger.info(f"  Num Epochs = {args.num_train_epochs}")
-        logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-        logger.info(f"  Total train batch size (w. parallel & distributed) = {total_train_batch_size}")
-        logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    logger.info("***** Running training *****")
+    logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Num Epochs = {args.num_train_epochs}")
+    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    logger.info(f"  Total train batch size (w. parallel & distributed) = {total_train_batch_size}")
+    logger.info(f"  Total optimization steps = {args.max_train_steps}")
 
-        global_step = 0
+    global_step = 0
+    pipeline = FlaxUnconditionalStableDiffusionPipeline(
+        vae=vae,
+        unet=unet,
+        scheduler=noise_scheduler,
+    )
 
-        epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
-        for epoch in epochs:
-            # ======================== Training ================================
+    epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
+    for epoch in epochs:
+        # ======================== Training ================================
+        train_metrics = []
+        steps_per_epoch = len(train_dataset) // total_train_batch_size
+        train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
+        # train
+        for batch in train_dataloader:
+            batch = shard(batch)
+            state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
+            train_metrics.append(train_metric)
+            train_step_progress_bar.update(1)
+            global_step += 1
+            if global_step >= args.max_train_steps:
+                break
 
-            train_metrics = []
+        train_metric = jax_utils.unreplicate(train_metric)
+        train_step_progress_bar.close()
+        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+        params = {
+            "vae": vae_params,
+            "unet": state.params,
+            "scheduler": noise_scheduler_state
+        }
+        sampling_seed = jax.random.PRNGKey(0)
+        num_inference_steps = 50
+        num_devices = jax.local_device_count()
+        sampling_seed = jax.random.split(sampling_seed, num_devices)
+        batch_size = 1
+        images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
+        if jax.process_index() == 0:
+            logger.info("***** Saving training state *****")
+            if args.output_dir is not None:
+                os.makedirs(args.output_dir+'/samples', exist_ok=True)
+            images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
+            images = pipeline.numpy_to_pil(images)
+            for i, image in enumerate(images):
+                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(i)+'.png')
+            # pipeline.save_pretrained(
+            #     args.output_dir,
+            #     params={
+            #         "vae": get_params_to_save(vae_params),
+            #         "unet": get_params_to_save(state.params),
+            #     },
+            # )
 
-            steps_per_epoch = len(train_dataset) // total_train_batch_size
-            train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
-            # train
-            for batch in train_dataloader:
-                batch = shard(batch)
-                state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
-                train_metrics.append(train_metric)
-
-                train_step_progress_bar.update(1)
-
-                global_step += 1
-                if global_step >= args.max_train_steps:
-                    break
-
-            train_metric = jax_utils.unreplicate(train_metric)
-
-            train_step_progress_bar.close()
-            epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
 
     logger.info("***** Saving model *****")
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
-        scheduler = FlaxPNDMScheduler(
-            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
-        )
-        safety_checker = None
-        pipeline = FlaxStableDiffusionPipeline(
-            text_encoder=text_encoder,
-            vae=vae,
-            unet=unet,
-            tokenizer=tokenizer,
-            scheduler=scheduler,
-            safety_checker=safety_checker,
-            feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
-        )
-
         pipeline.save_pretrained(
             args.output_dir,
             params={
-                "text_encoder": get_params_to_save(text_encoder_params),
                 "vae": get_params_to_save(vae_params),
                 "unet": get_params_to_save(state.params),
-                # "safety_checker": safety_checker.params,
+                # "scheduler": get_params_to_save(scheduler.params),
             },
         )
-
         if args.push_to_hub:
             upload_folder(
                 repo_id=repo_id,
