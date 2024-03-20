@@ -383,7 +383,7 @@ def main():
     if args.lr_scheduler == "constant":
         warmup_steps = 1000
         warmup_schedule = optax.linear_schedule(
-            init_value=0.0, 
+            init_value=0.0,
             end_value=args.learning_rate, 
             transition_steps=warmup_steps, 
         )
@@ -413,7 +413,6 @@ def main():
     )
     noise_scheduler_state = noise_scheduler.create_state()
     
-
     # Initialization
     train_rngs = jax.random.split(rng, jax.local_device_count())
 
