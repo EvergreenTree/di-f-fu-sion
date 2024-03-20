@@ -492,7 +492,7 @@ def main():
     # Initialize EMA state with the same parameters as the model
     if args.ema:
         ema_decay = 0.99
-        ema_state = jax.tree_map(lambda x: x, state.params)
+        ema_state = state.params.copy()
 
 
     # Train!
@@ -524,27 +524,7 @@ def main():
             ema_params,
             new_params,
         )
-
-    epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
-    for epoch in epochs:
-        train_metrics = []
-        steps_per_epoch = len(train_dataset) // total_train_batch_size
-        train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
-        for batch in train_dataloader:
-            batch = shard(batch)
-            state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
-            train_metrics.append(train_metric)
-            train_step_progress_bar.update(1)
-            global_step += 1
-            if global_step >= args.max_train_steps:
-                break
-            if global_step % 1000 == 0:
-                state.params = jax_utils.unreplicate(state.params)  # Unreplicate to update EMA (assuming p_train_step is pmap-ed)
-                ema_state = update_ema_params(ema_state, state.params, ema_decay)
-
-        train_metric = jax_utils.unreplicate(train_metric)
-        train_step_progress_bar.close()
-        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+    def validate(checkpoint=False):
         params = {
             "vae": vae_params,
             "unet": ema_state if args.ema else state.params,
@@ -563,13 +543,35 @@ def main():
             images = pipeline.numpy_to_pil(images)
             for index, image in enumerate(images):
                 image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
-            # pipeline.save_pretrained(
-            #     args.output_dir,
-            #     params={
-            #         "vae": get_params_to_save(vae_params),
-            #         "unet": get_params_to_save(state.params),
-            #     },
-            # )
+            if checkpoint:
+                pipeline.save_pretrained(
+                    args.output_dir,
+                    params={
+                        "vae": get_params_to_save(vae_params),
+                        "unet": get_params_to_save(state.params),
+                    },
+                )
+                
+    epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
+    for epoch in epochs:
+        train_metrics = []
+        steps_per_epoch = len(train_dataset) // total_train_batch_size
+        train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
+        for batch in train_dataloader:
+            batch = shard(batch)
+            state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
+            train_metrics.append(train_metric)
+            train_step_progress_bar.update(1)
+            global_step += 1
+            if global_step >= args.max_train_steps:
+                break
+            if (global_step+1) % 1000 == 0:
+                ema_state = update_ema_params(ema_state, state.params, ema_decay)
+
+        train_metric = jax_utils.unreplicate(train_metric)
+        train_step_progress_bar.close()
+        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+        validate()
 
     logger.info("***** Saving model *****")
     # Create the pipeline using using the trained modules and save it.
