@@ -411,7 +411,7 @@ def main():
         adamw,
     )
     state = train_state.TrainState.create(apply_fn=unet.__call__, params=unet_params, tx=optimizer)
-    noise_scheduler = FlaxDDPMScheduler(
+    noise_scheduler = FlaxPNDMScheduler(
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000
     )
     noise_scheduler_state = noise_scheduler.create_state()
@@ -534,27 +534,27 @@ def main():
             "unet": state.params,
             "scheduler": noise_scheduler_state
         }
-        sampling_seed = jax.random.PRNGKey(0)
-        num_inference_steps = 50
-        num_devices = jax.local_device_count()
-        sampling_seed = jax.random.split(sampling_seed, num_devices)
-        batch_size = 1
-        images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
-        if jax.process_index() == 0:
-            logger.info("***** Saving training state *****")
-            if args.output_dir is not None:
-                os.makedirs(args.output_dir+'/samples', exist_ok=True)
-            images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
-            images = pipeline.numpy_to_pil(images)
-            for i, image in enumerate(images):
-                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(i)+'.png')
-            # pipeline.save_pretrained(
-            #     args.output_dir,
-            #     params={
-            #         "vae": get_params_to_save(vae_params),
-            #         "unet": get_params_to_save(state.params),
-            #     },
-            # )
+        # sampling_seed = jax.random.PRNGKey(0)
+        # num_inference_steps = 50
+        # num_devices = jax.local_device_count()
+        # sampling_seed = jax.random.split(sampling_seed, num_devices)
+        # batch_size = 1
+        # images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
+        # if jax.process_index() == 0:
+        #     logger.info("***** Saving training state *****")
+        #     if args.output_dir is not None:
+        #         os.makedirs(args.output_dir+'/samples', exist_ok=True)
+        #     images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
+        #     images = pipeline.numpy_to_pil(images)
+        #     for i, image in enumerate(images):
+        #         image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(i)+'.png')
+        #     # pipeline.save_pretrained(
+        #     #     args.output_dir,
+        #     #     params={
+        #     #         "vae": get_params_to_save(vae_params),
+        #     #         "unet": get_params_to_save(state.params),
+        #     #     },
+        #     # )
 
 
     logger.info("***** Saving model *****")

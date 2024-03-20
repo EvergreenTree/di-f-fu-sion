@@ -73,6 +73,7 @@ LOADABLE_CLASSES = {
     },
     "schedulers": {
         "FlaxPNDMScheduler": ["save_pretrained", "from_pretrained"],
+        "FlaxDDPMScheduler": ["save_pretrained", "from_pretrained"],
     },
 }
 
