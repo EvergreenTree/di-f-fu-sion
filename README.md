@@ -14,7 +14,7 @@ python3 train_unconditional_local.py \
   --resolution=512 --center_crop --random_flip --seed 35 \
   --train_batch_size=1 \
   --max_train_steps=50000 \
-  --learning_rate=1e-6 --scale_lr \
+  --learning_rate=2e-7 --scale_lr \
   --output_dir="sd-portraits-compare-50000" \
   --unet_config_path="configs/unet-config-medium-conic.json"
 ```
