@@ -2,7 +2,7 @@ import argparse
 import logging
 import math
 import os
-import random
+from PIL import Image
 from pathlib import Path
 
 import jax
@@ -271,7 +271,6 @@ def main():
     if jax.process_index() == 0:
         if args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
-
         if args.push_to_hub:
             repo_id = create_repo(
                 repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
@@ -382,7 +381,7 @@ def main():
     if args.scale_lr:
         args.learning_rate = args.learning_rate * total_train_batch_size
     if args.lr_scheduler == "constant":
-        warmup_steps = 500
+        warmup_steps = 1000
         warmup_schedule = optax.linear_schedule(
             init_value=0.0, 
             end_value=args.learning_rate, 
@@ -403,8 +402,6 @@ def main():
         eps=args.adam_epsilon,
         weight_decay=args.adam_weight_decay,
     )
-    # Combine warm-up with the main schedule
-    # `warmup_steps` is used to switch from the warmup schedule to the main schedule
     
     optimizer = optax.chain(
         optax.clip_by_global_norm(args.max_grad_norm),
@@ -415,7 +412,6 @@ def main():
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000
     )
     noise_scheduler_state = noise_scheduler.create_state()
-    noise_scheduler_state_p = replicate(noise_scheduler_state)
     
 
     # Initialization
@@ -485,6 +481,7 @@ def main():
     p_train_step = jax.pmap(train_step, "batch", donate_argnums=(0,))
 
     # Replicate the train state on each device
+    noise_scheduler_state_p = jax_utils.replicate(noise_scheduler_state)
     state = jax_utils.replicate(state)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
@@ -547,9 +544,16 @@ def main():
             if args.output_dir is not None:
                 os.makedirs(args.output_dir+'/samples', exist_ok=True)
             images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
-            images = pipeline.numpy_to_pil(images)
-            for i, image in enumerate(images):
-                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(i)+'.png')
+            images = pipeline.numpy_to_pil(images)    
+            grid_img = Image.new('RGB', (4*256, 2*256), color=(255,255,255))
+            for index, image in enumerate(images):
+                if index >= 8:
+                    break  # Stop if we have filled the grid
+                row = index // 4
+                col = index % 4
+                x = col * 256 
+                y = row * 256 
+                grid_img.paste(image, (x, y))
             # pipeline.save_pretrained(
             #     args.output_dir,
             #     params={
