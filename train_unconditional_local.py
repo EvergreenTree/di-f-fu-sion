@@ -360,7 +360,6 @@ def main():
     # reload unet
     if args.unet_config_path:
         config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
-        del unet
         unet = FlaxUNet2DConditionModel.from_config(
             config,
             revision=args.revision,
