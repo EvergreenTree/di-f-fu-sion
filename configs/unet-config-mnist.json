@@ -7,8 +7,8 @@
   "attention_head_dim": 32,
   "block_out_channels": [
     320,
-    320,
-    320
+    640,
+    1280
   ],
   "cross_attention_dim": 0,
   "down_block_types": [
@@ -34,6 +34,5 @@
     "CrossAttnUpBlock2D"
   ],
   "use_linear_projection": false,
-  "use_memory_efficient_attention": false,
-  "act_fn": "colu"
+  "use_memory_efficient_attention": false
 }

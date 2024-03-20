@@ -539,6 +539,7 @@ class FlaxToyDiffusionPipeline(FlaxUnconditionalStableDiffusionPipeline):
         width: int,
         guidance_scale: float,
         latents: Optional[jnp.ndarray] = None,
+        neg_prompt_ids: Optional[jnp.ndarray] = None,
     ):
         context = None
         batch_size = prompt_ids
