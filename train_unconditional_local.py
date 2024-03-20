@@ -518,14 +518,19 @@ def main():
         scheduler=noise_scheduler,
     )
 
+    def update_ema_params(ema_params, new_params, decay):
+        return jax.tree_multimap(
+            lambda ema, new: ema * decay + (1 - decay) * new,
+            ema_params,
+            new_params,
+        )
+
     epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
     for epoch in epochs:
-        # ======================== Training ================================
         train_metrics = []
         steps_per_epoch = len(train_dataset) // total_train_batch_size
         train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
-        # train
-        for batch in enumerate(train_dataloader):
+        for batch in train_dataloader:
             batch = shard(batch)
             state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
             train_metrics.append(train_metric)
@@ -534,12 +539,6 @@ def main():
             if global_step >= args.max_train_steps:
                 break
             if global_step % 1000 == 0:
-                def update_ema_params(ema_params, new_params, decay):
-                    return jax.tree_multimap(
-                        lambda ema, new: ema * decay + (1 - decay) * new,
-                        ema_params,
-                        new_params,
-                    )
                 state.params = jax_utils.unreplicate(state.params)  # Unreplicate to update EMA (assuming p_train_step is pmap-ed)
                 ema_state = update_ema_params(ema_state, state.params, ema_decay)
 
@@ -548,7 +547,7 @@ def main():
         epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
         params = {
             "vae": vae_params,
-            "unet": ema_state if args.ema else state.params,\
+            "unet": ema_state if args.ema else state.params,
             "scheduler": noise_scheduler_state_p
         }
         sampling_seed = jax.random.PRNGKey(0)
@@ -561,8 +560,7 @@ def main():
             if args.output_dir is not None:
                 os.makedirs(args.output_dir+'/samples', exist_ok=True)
             images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
-            images = pipeline.numpy_to_pil(images)    
-            grid_img = Image.new('RGB', (4*256, 2*256), color=(255,255,255))
+            images = pipeline.numpy_to_pil(images)
             for index, image in enumerate(images):
                 image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
             # pipeline.save_pretrained(
@@ -573,7 +571,6 @@ def main():
             #     },
             # )
 
-
     logger.info("***** Saving model *****")
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
@@ -581,7 +578,7 @@ def main():
             args.output_dir,
             params={
                 "vae": get_params_to_save(vae_params),
-                "unet": get_params_to_save(state.params),
+                "unet": get_params_to_save(ema_state.params),
                 # "scheduler": get_params_to_save(scheduler.params),
             },
         )
