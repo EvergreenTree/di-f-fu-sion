@@ -524,7 +524,7 @@ def main():
     )
 
     def update_ema_params(ema_params, new_params, decay):
-        return jax.tree_multimap(
+        return jax.tree_map(
             lambda ema, new: ema * decay + (1 - decay) * new,
             ema_params,
             new_params,
