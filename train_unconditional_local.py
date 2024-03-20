@@ -347,13 +347,27 @@ def main():
     )
     rng = jax.random.PRNGKey(args.seed)
 
-    unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path,
-        from_pt=args.from_pt,
-        revision=args.revision,
-        subfolder="unet",
-        dtype=weight_dtype,
-    )
+    # load parameters
+    if args.unet_config_path is None or not args.from_scratch:
+        unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
+            args.pretrained_model_name_or_path,
+            from_pt=args.from_pt,
+            revision=args.revision,
+            subfolder="unet",
+            dtype=weight_dtype,
+        )
+
+    # reload unet
+    if args.unet_config_path:
+        config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
+        del unet
+        unet = FlaxUNet2DConditionModel.from_config(
+            config,
+            revision=args.revision,
+            dtype=weight_dtype,
+        )
+
+    # reload parameters
     if args.from_scratch:
         # Reinitialize weights
         rng, key = jax.random.split(rng)
@@ -373,14 +387,6 @@ def main():
             unet.cross_attention_dim = 0 # save config to be compatible for loading later
             unet_params = jax.tree_map(prune, unet_params)
         
-    if args.unet_config_path:
-        config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
-        del unet
-        unet = FlaxUNet2DConditionModel.from_config(
-            config,
-            revision=args.revision,
-            dtype=weight_dtype,
-        )
 
     # Optimization
     if args.scale_lr:
