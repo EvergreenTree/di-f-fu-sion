@@ -370,7 +370,6 @@ def main():
     if args.from_scratch:
         # Reinitialize weights
         rng, key = jax.random.split(rng)
-        del unet_params
         unet_params = unet.init_weights(key)
     else:
         # Roughly adapt to pre-trained weights. In the cross-attention case with shape [768, C], prune it to shape [C,C].
