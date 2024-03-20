@@ -230,6 +230,11 @@ def parse_args():
         action="store_true",
         help="Clear model memory.",
     )
+    parser.add_argument(
+        "--ema",
+        action="store_true",
+        help="EMA weight decay.",
+    )
 
 
     args = parser.parse_args()
@@ -484,6 +489,11 @@ def main():
     state = jax_utils.replicate(state)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
+    # Initialize EMA state with the same parameters as the model
+    if args.ema:
+        ema_decay = 0.99
+        ema_state = jax.tree_map(lambda x: x, state.params)
+
 
     # Train!
     num_update_steps_per_epoch = math.ceil(len(train_dataloader))
@@ -515,7 +525,7 @@ def main():
         steps_per_epoch = len(train_dataset) // total_train_batch_size
         train_step_progress_bar = tqdm(total=steps_per_epoch, desc="Training...", position=1, leave=False)
         # train
-        for batch in train_dataloader:
+        for batch in enumerate(train_dataloader):
             batch = shard(batch)
             state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
             train_metrics.append(train_metric)
@@ -523,13 +533,22 @@ def main():
             global_step += 1
             if global_step >= args.max_train_steps:
                 break
+            if global_step % 1000 == 0:
+                def update_ema_params(ema_params, new_params, decay):
+                    return jax.tree_multimap(
+                        lambda ema, new: ema * decay + (1 - decay) * new,
+                        ema_params,
+                        new_params,
+                    )
+                state.params = jax_utils.unreplicate(state.params)  # Unreplicate to update EMA (assuming p_train_step is pmap-ed)
+                ema_state = update_ema_params(ema_state, state.params, ema_decay)
 
         train_metric = jax_utils.unreplicate(train_metric)
         train_step_progress_bar.close()
         epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
         params = {
             "vae": vae_params,
-            "unet": state.params,
+            "unet": ema_state if args.ema else state.params,\
             "scheduler": noise_scheduler_state_p
         }
         sampling_seed = jax.random.PRNGKey(0)
@@ -539,7 +558,6 @@ def main():
         batch_size = 1
         images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
         if jax.process_index() == 0:
-            logger.info("***** Saving training state *****")
             if args.output_dir is not None:
                 os.makedirs(args.output_dir+'/samples', exist_ok=True)
             images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
