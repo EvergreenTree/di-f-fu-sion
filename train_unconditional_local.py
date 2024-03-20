@@ -564,13 +564,7 @@ def main():
             images = pipeline.numpy_to_pil(images)    
             grid_img = Image.new('RGB', (4*256, 2*256), color=(255,255,255))
             for index, image in enumerate(images):
-                if index >= 8:
-                    break  # Stop if we have filled the grid
-                row = index // 4
-                col = index % 4
-                x = col * 256 
-                y = row * 256 
-                grid_img.paste(image, (x, y))
+                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
             # pipeline.save_pretrained(
             #     args.output_dir,
             #     params={
