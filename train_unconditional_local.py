@@ -337,7 +337,7 @@ def main():
         weight_dtype = jnp.float16
     elif args.mixed_precision == "bf16":
         weight_dtype = jnp.bfloat16
-    tokenizer = text_encoder = None
+    # tokenizer = text_encoder = None
     vae, vae_params = FlaxAutoencoderKL.from_pretrained(
         args.pretrained_model_name_or_path,
         from_pt=args.from_pt,
@@ -425,6 +425,34 @@ def main():
     # Initialization
     train_rngs = jax.random.split(rng, jax.local_device_count())
 
+    def validate(checkpoint=False):
+        params = {
+            "vae": vae_params,
+            "unet": ema_params if args.ema else state.params,
+            "scheduler": noise_scheduler_state_p
+        }
+        sampling_seed = jax.random.PRNGKey(0)
+        num_inference_steps = 50
+        num_devices = jax.local_device_count()
+        sampling_seed = jax.random.split(sampling_seed, num_devices)
+        batch_size = 1
+        images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
+        if jax.process_index() == 0:
+            if args.output_dir is not None:
+                os.makedirs(args.output_dir+'/samples', exist_ok=True)
+            images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
+            images = pipeline.numpy_to_pil(images)
+            for index, image in enumerate(images):
+                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
+            if checkpoint:
+                pipeline.save_pretrained(
+                    args.output_dir,
+                    params={
+                        "vae": get_params_to_save(vae_params),
+                        "unet": get_params_to_save(state.params),
+                    },
+                )
+
     def train_step(state, text_encoder_params, vae_params, batch, train_rng):
         dropout_rng, sample_rng, new_train_rng = jax.random.split(train_rng, 3)
 
@@ -488,15 +516,19 @@ def main():
     # Create parallel version of the train step
     p_train_step = jax.pmap(train_step, "batch", donate_argnums=(0,))
 
+    # EMA weights
+    if args.ema:
+        ema_decay = 0.99
+        ema_params = jax.tree_map(lambda x: x+0, unet_params)
+
     # Replicate the train state on each device
     noise_scheduler_state_p = jax_utils.replicate(noise_scheduler_state)
     state = jax_utils.replicate(state)
+    if args.ema:
+        ema_params = jax_utils.replicate(ema_params)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
     # Initialize EMA state with the same parameters as the model
-    if args.ema:
-        ema_decay = 0.99
-        ema_state = state.params.copy()
 
 
     # Train!
@@ -521,40 +553,6 @@ def main():
         unet=unet,
         scheduler=noise_scheduler,
     )
-
-    def update_ema_params(ema_params, new_params, decay):
-        return jax.tree_map(
-            lambda ema, new: ema * decay + (1 - decay) * new,
-            ema_params,
-            new_params,
-        )
-    def validate(checkpoint=False):
-        params = {
-            "vae": vae_params,
-            "unet": ema_state if args.ema else state.params,
-            "scheduler": noise_scheduler_state_p
-        }
-        sampling_seed = jax.random.PRNGKey(0)
-        num_inference_steps = 50
-        num_devices = jax.local_device_count()
-        sampling_seed = jax.random.split(sampling_seed, num_devices)
-        batch_size = 1
-        images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
-        if jax.process_index() == 0:
-            if args.output_dir is not None:
-                os.makedirs(args.output_dir+'/samples', exist_ok=True)
-            images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
-            images = pipeline.numpy_to_pil(images)
-            for index, image in enumerate(images):
-                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
-            if checkpoint:
-                pipeline.save_pretrained(
-                    args.output_dir,
-                    params={
-                        "vae": get_params_to_save(vae_params),
-                        "unet": get_params_to_save(state.params),
-                    },
-                )
                 
     epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
     for epoch in epochs:
@@ -566,11 +564,31 @@ def main():
             state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
             train_metrics.append(train_metric)
             train_step_progress_bar.update(1)
-            global_step += 1
             if global_step >= args.max_train_steps:
                 break
-            if (global_step+1) % 1000 == 0:
-                ema_state = update_ema_params(ema_state, state.params, ema_decay)
+            if global_step % 1000 == 0:
+                validate()
+            global_step += 1
+            if args.ema and global_step % 1000 == 0:
+                ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params,state.params)
+            if (epoch + 1) % 30 == 0:
+                logger.info(f"***** Saving model *****")
+                if jax.process_index() == 0:
+                    pipeline.save_pretrained(
+                        args.output_dir,
+                        params={
+                            "vae": get_params_to_save(vae_params),
+                            "unet": get_params_to_save(ema_state.params),
+                            # "scheduler": get_params_to_save(scheduler.params),
+                        },
+                    )
+                    if args.push_to_hub:
+                        upload_folder(
+                            repo_id=repo_id,
+                            folder_path=args.output_dir,
+                            commit_message="End of training",
+                            ignore_patterns=["step_*", "epoch_*"],
+                        )
 
         train_metric = jax_utils.unreplicate(train_metric)
         train_step_progress_bar.close()
@@ -578,7 +596,6 @@ def main():
         # validate()
 
     logger.info("***** Saving model *****")
-    # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
         pipeline.save_pretrained(
             args.output_dir,
