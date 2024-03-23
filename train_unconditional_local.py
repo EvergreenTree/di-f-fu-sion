@@ -582,7 +582,7 @@ def main():
             global_step += 1
             if args.ema and global_step % 1000 == 0:
                 if jax.process_index() == 0:
-                    state_snapshot = jax.get_params_to_save(state.params.copy()) # not on device 
+                    state_snapshot = get_params_to_save(state.params.copy()) # not on device 
                     ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params, state_snapshot)
 
         train_metric = jax_utils.unreplicate(train_metric)
@@ -592,7 +592,7 @@ def main():
     logger.info("***** Saving model *****")
     if args.ema:
         if jax.process_index() == 0:
-            state_snapshot = jax.get_params_to_save(state.params.copy()) # not on device 
+            state_snapshot = get_params_to_save(state.params.copy()) # not on device 
             ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params, state_snapshot)
 
     save()
