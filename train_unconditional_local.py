@@ -232,8 +232,9 @@ def parse_args():
     )
     parser.add_argument(
         "--ema",
-        action="store_true",
-        help="EMA weight decay.",
+        type=bool,
+        default=True,
+        help="EMA weight decay (True by default).",
     )
 
 
@@ -425,10 +426,10 @@ def main():
     # Initialization
     train_rngs = jax.random.split(rng, jax.local_device_count())
 
-    def validate(checkpoint=False):
+    def validate():
         params = {
             "vae": vae_params,
-            "unet": ema_params if args.ema else state.params,
+            "unet": state.params,
             "scheduler": noise_scheduler_state_p
         }
         sampling_seed = jax.random.PRNGKey(0)
@@ -444,13 +445,23 @@ def main():
             images = pipeline.numpy_to_pil(images)
             for index, image in enumerate(images):
                 image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
-            if checkpoint:
-                pipeline.save_pretrained(
-                    args.output_dir,
-                    params={
-                        "vae": get_params_to_save(vae_params),
-                        "unet": get_params_to_save(state.params),
-                    },
+            
+    def save():
+        if jax.process_index() == 0:
+            pipeline.save_pretrained(
+                args.output_dir,
+                params={
+                    "vae": get_params_to_save(vae_params),
+                    "unet": ema_params,
+                    # "scheduler": get_params_to_save(scheduler.params),
+                },
+            )
+            if args.push_to_hub:
+                upload_folder(
+                    repo_id=repo_id,
+                    folder_path=args.output_dir,
+                    commit_message="End of training",
+                    ignore_patterns=["step_*", "epoch_*"],
                 )
 
     def train_step(state, text_encoder_params, vae_params, batch, train_rng):
@@ -519,13 +530,14 @@ def main():
     # EMA weights
     if args.ema:
         ema_decay = 0.99
-        ema_params = jax.tree_map(lambda x: x+0, unet_params)
+        ema_params = jax.device_get(unet_params.copy())
+        # note on memory handling: do not put it on TPU device
+        # broadcasting and tpu + cpu operation is automatically handled
+        # EMA can be done on cpu
 
     # Replicate the train state on each device
     noise_scheduler_state_p = jax_utils.replicate(noise_scheduler_state)
     state = jax_utils.replicate(state)
-    if args.ema:
-        ema_params = jax_utils.replicate(ema_params)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
 
@@ -569,32 +581,21 @@ def main():
                 validate()
             global_step += 1
             if args.ema and global_step % 1000 == 0:
-                ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params,state.params)
+                if jax.process_index() == 0:
+                    state_snapshot = jax.get_params_to_save(state.params.copy()) # not on device 
+                    ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params, state_snapshot)
 
         train_metric = jax_utils.unreplicate(train_metric)
         train_step_progress_bar.close()
         epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
-        # validate()
 
     logger.info("***** Saving model *****")
-    if jax.process_index() == 0:
-        pipeline.save_pretrained(
-            args.output_dir,
-            params={
-                "vae": get_params_to_save(vae_params),
-                "unet": get_params_to_save(ema_params),
-                # "scheduler": get_params_to_save(scheduler.params),
-            },
-        )
-        if args.push_to_hub:
-            upload_folder(
-                repo_id=repo_id,
-                folder_path=args.output_dir,
-                commit_message="End of training",
-                ignore_patterns=["step_*", "epoch_*"],
-            )
+    if args.ema:
+        if jax.process_index() == 0:
+            state_snapshot = jax.get_params_to_save(state.params.copy()) # not on device 
+            ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params, state_snapshot)
 
-    
+    save()
 
 if __name__ == "__main__":
     main()
