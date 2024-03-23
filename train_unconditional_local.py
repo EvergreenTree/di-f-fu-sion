@@ -582,8 +582,7 @@ def main():
             args.output_dir,
             params={
                 "vae": get_params_to_save(vae_params),
-                "unet": get_params_to_save(ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params,state.params)
-.params),
+                "unet": get_params_to_save(ema_params),
                 # "scheduler": get_params_to_save(scheduler.params),
             },
         )
