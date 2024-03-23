@@ -444,7 +444,7 @@ def main():
             images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
             images = pipeline.numpy_to_pil(images)
             for index, image in enumerate(images):
-                image.save(args.output_dir+'/samples/epoch'+str(epoch)+'_'+str(index)+".png")
+                image.save(args.output_dir+'/samples/step'+str(global_step)+'_'+str(index)+".png")
             
     def save():
         if jax.process_index() == 0:
@@ -577,7 +577,7 @@ def main():
             train_step_progress_bar.update(1)
             if global_step >= args.max_train_steps:
                 break
-            if global_step % 1000 == 0:
+            if global_step % 10000 == 0:
                 validate()
             global_step += 1
             if args.ema and global_step % 1000 == 0:
