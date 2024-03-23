@@ -528,7 +528,6 @@ def main():
         ema_params = jax_utils.replicate(ema_params)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
-    # Initialize EMA state with the same parameters as the model
 
 
     # Train!
@@ -571,24 +570,6 @@ def main():
             global_step += 1
             if args.ema and global_step % 1000 == 0:
                 ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params,state.params)
-            if (epoch + 1) % 30 == 0:
-                logger.info(f"***** Saving model *****")
-                if jax.process_index() == 0:
-                    pipeline.save_pretrained(
-                        args.output_dir,
-                        params={
-                            "vae": get_params_to_save(vae_params),
-                            "unet": get_params_to_save(ema_state.params),
-                            # "scheduler": get_params_to_save(scheduler.params),
-                        },
-                    )
-                    if args.push_to_hub:
-                        upload_folder(
-                            repo_id=repo_id,
-                            folder_path=args.output_dir,
-                            commit_message="End of training",
-                            ignore_patterns=["step_*", "epoch_*"],
-                        )
 
         train_metric = jax_utils.unreplicate(train_metric)
         train_step_progress_bar.close()
@@ -601,7 +582,8 @@ def main():
             args.output_dir,
             params={
                 "vae": get_params_to_save(vae_params),
-                "unet": get_params_to_save(ema_state.params),
+                "unet": get_params_to_save(ema_params = jax.tree_util.tree_map(lambda ema, new: ema * ema_decay + (1 - ema_decay) * new, ema_params,state.params)
+.params),
                 # "scheduler": get_params_to_save(scheduler.params),
             },
         )
