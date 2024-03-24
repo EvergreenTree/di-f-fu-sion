@@ -4,7 +4,7 @@ import math
 import os
 import random
 from pathlib import Path
-
+from PIL import Image
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -405,13 +405,44 @@ def main():
 
     state = train_state.TrainState.create(apply_fn=unet.__call__, params=unet_params, tx=optimizer)
 
-    noise_scheduler = FlaxDDPMScheduler(
+    noise_scheduler = FlaxPNDMScheduler(
         beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000
     )
     noise_scheduler_state = noise_scheduler.create_state()
 
     # Initialize our training
     train_rngs = jax.random.split(rng, jax.local_device_count())
+
+    def validate():
+        params = {
+            "unet": state.params,
+            "scheduler": noise_scheduler_state_p
+        }
+        sampling_seed = jax.random.PRNGKey(0)
+        num_inference_steps = 50
+        num_devices = jax.local_device_count()
+        sampling_seed = jax.random.split(sampling_seed, num_devices)
+        batch_size = 1
+        images = pipeline(batch_size, params, sampling_seed, num_inference_steps, jit=True).images
+        if jax.process_index() == 0:
+            if args.output_dir is not None:
+                os.makedirs(args.output_dir+'/samples', exist_ok=True)
+            images = np.asarray(images.reshape((batch_size * num_devices,) + images.shape[-3:]))
+            images = pipeline.numpy_to_pil(images)
+            # for index, image in enumerate(images):
+            #     image.save(args.output_dir+'/samples/step'+str(global_step)+'_'+str(index)+".png")
+            H = args.resolution
+            grid_img = Image.new('RGB', (4*H, 2*H), color=(255,255,255))
+            for index, image in enumerate(images):
+                if index >= 8:
+                    break  # Stop if we have filled the grid
+                row = index // 4
+                col = index % 4
+                x = col * H
+                y = row * H
+                grid_img.paste(image.resize((H,H)), (x, y))
+                grid_img.save(args.output_dir+'/samples/step'+str(global_step)+'_'+str(index)+".png")
+            
 
     def train_step(state, text_encoder_params, vae_params, batch, train_rng):
         sample_rng, new_train_rng = jax.random.split(train_rng, 2)
@@ -476,41 +507,7 @@ def main():
     state = jax_utils.replicate(state)
     text_encoder_params = None
     vae_params = jax_utils.replicate(vae_params)
-
-    # Enable snapshot
-    def sow(*args, **kwargs):
-        if jax.process_index() == 0:
-            scheduler = FlaxPNDMScheduler(
-                beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
-            )
-            safety_checker = None
-            pipeline = FlaxToyDiffusionPipeline(
-                unet=unet,
-                scheduler=scheduler,
-            )
-            # save 
-            from flax.jax_utils import replicate
-            unet_params = replicate(state.params)
-            params = {
-                    "vae": get_params_to_save(vae_params),
-                    "unet": get_params_to_save(unet_params),
-                }
-            pipeline.save_pretrained(
-                args.output_dir,
-                params=params,
-            )
-            from flax.training.common_utils import shard
-            prng_seed = jax.random.PRNGKey(23)
-            num_inference_steps = 50
-            num_samples = jax.device_count()
-            prompt_ids = jnp.zeros((num_samples,1))
-            images = pipeline(prompt_ids, params, prng_seed, num_inference_steps, jit=True).images
-            images = pipeline.numpy_to_pil(np.asarray(images.reshape((num_samples,) + images.shape[-3:])))
-            images[0].resize((256, 256)).save('snapshot.png')
-            del params, unet_params
-
-    import signal
-    signal.signal(signal.SIGUSR1, sow)
+    noise_scheduler_state_p = jax_utils.replicate(noise_scheduler_state)
 
     # Train!
     num_update_steps_per_epoch = math.ceil(len(train_dataloader))
@@ -520,6 +517,15 @@ def main():
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
 
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+
+    if jax.process_index() == 0:
+        # scheduler = FlaxPNDMScheduler(
+        #     beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
+        # )
+        pipeline = FlaxToyDiffusionPipeline(
+            unet=unet,
+            scheduler=noise_scheduler,
+        )
 
     if not args.dry_run:
         logger.info("***** Running training *****")
@@ -550,6 +556,9 @@ def main():
                 global_step += 1
                 if global_step >= args.max_train_steps:
                     break
+                if global_step % 1000 == 0:
+                    if jax.process_index() == 0:
+                        validate()
 
             train_metric = jax_utils.unreplicate(train_metric)
 
@@ -559,23 +568,12 @@ def main():
     logger.info("***** Saving model *****")
     # Create the pipeline using using the trained modules and save it.
     if jax.process_index() == 0:
-        scheduler = FlaxPNDMScheduler(
-            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", skip_prk_steps=True
-        )
-        safety_checker = None
-        pipeline = FlaxToyDiffusionPipeline(
-            unet=unet,
-            scheduler=scheduler,
-        )
-
         pipeline.save_pretrained(
             args.output_dir,
             params={
-                "vae": get_params_to_save(vae_params),
                 "unet": get_params_to_save(state.params),
             },
         )
-
         if args.push_to_hub:
             upload_folder(
                 repo_id=repo_id,

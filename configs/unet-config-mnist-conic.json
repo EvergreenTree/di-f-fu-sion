@@ -35,5 +35,5 @@
   ],
   "use_linear_projection": false,
   "use_memory_efficient_attention": false,
-  "act_fn": "silu"
+  "act_fn": "colu"
 }
