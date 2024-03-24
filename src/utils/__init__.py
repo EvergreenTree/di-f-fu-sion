@@ -37,14 +37,14 @@ from .deprecation_utils import deprecate
 from .doc_utils import replace_example_docstring
 from .dynamic_modules_utils import get_class_from_dynamic_module
 from .export_utils import export_to_gif, export_to_obj, export_to_ply, export_to_video
-# from .hub_utils import (
+# from . import (
 #     PushToHubMixin,
 #     _add_variant,
 #     _get_model_file,
 #     extract_commit_hash,
-#     http_user_agent,
+#     http_userhub_utils_agent,
 # )
-from .hub_utils import PushToHubMixin
+from .hub_utils import PushToHubMixin, extract_commit_hash
 from .import_utils import (
     BACKENDS_MAPPING,
     DIFFUSERS_SLOW_IMPORT,
