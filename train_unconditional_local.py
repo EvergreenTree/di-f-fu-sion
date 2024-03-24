@@ -358,21 +358,13 @@ def main():
             dtype=weight_dtype,
         )
 
-    # reload unet
-    if args.unet_config_path:
-        config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
-        unet = FlaxUNet2DConditionModel.from_config(
-            config,
-            revision=args.revision,
-            dtype=weight_dtype,
-        )
-
     # reload parameters
     if args.from_scratch:
         # Reinitialize weights
         rng, key = jax.random.split(rng)
         unet_params = unet.init_weights(key)
     else:
+        print("unet.cross_attention_dim",unet.cross_attention_dim)
         # Roughly adapt to pre-trained weights. In the cross-attention case with shape [768, C], prune it to shape [C,C].
         # in this case, unet_config_path must be the same as pre-trained model.
         def prune(x):
@@ -382,10 +374,18 @@ def main():
             return x
         if unet.cross_attention_dim > 0:
             print("Pruning cross-attention matrices to force the conditional model to be unconditional")
+            unet_params = jax.tree_map(prune, unet_params)
             unet.config.cross_attention_dim = 0 
             unet.cross_attention_dim = 0 # save config to be compatible for loading later
-            unet_params = jax.tree_map(prune, unet_params)
-        
+    
+    # reload unet
+    if args.unet_config_path:
+        config = FlaxUNet2DConditionModel.load_config(args.unet_config_path)
+        unet = FlaxUNet2DConditionModel.from_config(
+            config,
+            revision=args.revision,
+            dtype=weight_dtype,
+        )
 
     # Optimization
     if args.scale_lr:
