@@ -44,7 +44,6 @@ from huggingface_hub.utils import (
 from packaging import version
 from requests import HTTPError
 
-from .. import __version__
 from .constants import (
     DEPRECATED_REVISION_ARGS,
     HUGGINGFACE_CO_RESOLVE_ENDPOINT,
@@ -75,7 +74,7 @@ def http_user_agent(user_agent: Union[Dict, str, None] = None) -> str:
     """
     Formats a user-agent string with basic info about a request.
     """
-    ua = f"diffusers/{__version__}; python/{sys.version.split()[0]}; session_id/{SESSION_ID}"
+    ua = f"diffusers/0.28.0; python/{sys.version.split()[0]}; session_id/{SESSION_ID}"
     if HF_HUB_DISABLE_TELEMETRY or HF_HUB_OFFLINE:
         return ua + "; telemetry/off"
     if is_torch_available():
