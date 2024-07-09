@@ -67,7 +67,7 @@ class InceptionV3(nn.Module):
             self.num_classes_ = self.num_classes
 
     @nn.compact
-    def __call__(self, x, train=True, rng=jax.random.PRNGKey(0)):
+    def __call__(self, x, train=True):
         """
         Args:
             x (tensor): Input image, shape [B, H, W, C].
@@ -139,7 +139,7 @@ class InceptionV3(nn.Module):
         x = jnp.mean(x, axis=(1, 2), keepdims=True)
         if not self.include_head:
             return x
-        x = nn.Dropout(rate=0.5)(x, deterministic=not train, rng=rng)
+        # x = nn.Dropout(rate=0.5)(x, deterministic=not train, rng=rng)
         x = jnp.reshape(x, newshape=(x.shape[0], -1))
         x = Dense(features=self.num_classes_,
                   params_dict=utils.get(self.params_dict, 'fc'),

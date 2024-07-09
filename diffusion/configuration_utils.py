@@ -35,7 +35,7 @@ from huggingface_hub.utils import (
 )
 from requests import HTTPError
 
-from src.utils.hub_utils import http_user_agent
+from diffusion.utils.hub_utils import http_user_agent
 
 # from . import __version__
 from .utils import (

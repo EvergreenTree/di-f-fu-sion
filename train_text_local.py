@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import torch
+import time
 from torchvision import transforms
 from datasets import load_dataset
 from flax import jax_utils
@@ -18,259 +19,19 @@ from flax.training.common_utils import shard
 from huggingface_hub import create_repo, upload_folder
 from tqdm.auto import tqdm
 import transformers
-from transformers import CLIPTokenizer, FlaxCLIPTextModel, set_seed #, CLIPImageProcessor
 from tensorboardX import SummaryWriter
-
-from src.models.unet_2d_condition_flax import FlaxUNet2DConditionModel
-from src.pipeline_flax_stable_diffusion import (
+from diffusion.models.unet_2d_condition_flax import FlaxUNet2DConditionModel
+from diffusion.pipeline_flax_stable_diffusion import (
     FlaxAutoencoderKL,
     FlaxPNDMScheduler,
     FlaxStableDiffusionPipeline,
     FlaxUNet2DConditionModel,
     FlaxToyDiffusionPipeline,
-    FlaxUnconditionalStableDiffusionPipeline
 )
-from src.fid import inception
+from diffusion.fid import inception
+from diffusion.config import sd14, toy # config was to long, put them in sd14.py
 
 logger = logging.getLogger(__name__)
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Simple example of a training script.")
-    parser.add_argument(
-        "--pretrained_model_name_or_path",
-        type=str,
-        default=None,
-        required=False,
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        required=False,
-        help="Revision of pretrained model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--variant",
-        type=str,
-        default=None,
-        help="Variant of the model files of the pretrained model identifier from huggingface.co/models, 'e.g.' fp16",
-    )
-    parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default=None,
-        help=(
-            "The name of the Dataset (from the HuggingFace hub) to train on (could be your own, possibly private,"
-            " dataset). It can also be a path pointing to a local copy of a dataset in your filesystem,"
-            " or to a folder containing files that HuggingFace Datasets can understand."
-        ),
-    )
-    parser.add_argument(
-        "--dataset_config_name",
-        type=str,
-        default=None,
-        help="The config of the Dataset, leave as None if there's only one config.",
-    )
-    parser.add_argument(
-        "--train_data_dir",
-        type=str,
-        default=None,
-        help=(
-            "A folder containing the training data. Folder contents must follow the structure described in"
-            " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
-            " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
-        ),
-    )
-    parser.add_argument(
-        "--image_column", type=str, default=None, help="The column of the dataset containing an image."
-    )
-    parser.add_argument(
-        "--caption_column",
-        type=str,
-        default=None,
-        help="The column of the dataset containing a caption or a list of captions.",
-    )
-    parser.add_argument(
-        "--max_train_samples",
-        type=int,
-        default=None,
-        help=(
-            "For debugging purposes or quicker training, truncate the number of training examples to this "
-            "value if set."
-        ),
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="sd-model-finetuned",
-        help="The output directory where the model predictions and checkpoints will be written.",
-    )
-    parser.add_argument(
-        "--cache_dir",
-        type=str,
-        default=None,
-        help="The directory where the downloaded models and datasets will be stored.",
-    )
-    parser.add_argument("--seed", type=int, default=103, help="A seed for reproducible training.")
-    parser.add_argument(
-        "--resolution",
-        type=int,
-        default=512,
-        help=(
-            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
-            " resolution"
-        ),
-    )
-    parser.add_argument(
-        "--center_crop",
-        default=False,
-        action="store_true",
-        help=(
-            "Whether to center crop the input images to the resolution. If not set, the images will be randomly"
-            " cropped. The images will be resized to the resolution first before cropping."
-        ),
-    )
-    parser.add_argument(
-        "--random_flip",
-        action="store_true",
-        help="whether to randomly flip images horizontally",
-    )
-    parser.add_argument(
-        "--train_batch_size", type=int, default=1, help="Batch size (per device) for the training dataloader."
-    )
-    parser.add_argument("--num_train_epochs", type=int, default=100)
-    parser.add_argument(
-        "--max_train_steps",
-        type=int,
-        default=None,
-        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=1e-6,
-        help="Initial learning rate (after the potential warmup period) to use.",
-    )
-    parser.add_argument(
-        "--scale_lr",
-        action="store_true",
-        default=False,
-        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
-    )
-    parser.add_argument(
-        "--lr_scheduler",
-        type=str,
-        default="constant",
-        help=(
-            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-            ' "constant", "constant_with_warmup"]'
-        ),
-    )
-    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
-    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-    parser.add_argument("--max_grad_norm", default=1e4, type=float, help="Max gradient norm.")
-    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
-    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
-    parser.add_argument(
-        "--hub_model_id",
-        type=str,
-        default=None,
-        help="The name of the repository to keep in sync with the local `output_dir`.",
-    )
-    parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="sd-logs",
-        help=(
-            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
-        ),
-    )
-    parser.add_argument(
-        "--unet_config_path",
-        default=None,
-        help="If specified, re-initialize the unet with the given config (Optional)",
-    )
-    parser.add_argument(
-        "--mixed_precision",
-        type=str,
-        default="no",
-        choices=["no", "fp16", "bf16"],
-        help=(
-            "Whether to use mixed precision. Choose"
-            "between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10."
-            "and an Nvidia Ampere GPU."
-        ),
-    )
-    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
-    parser.add_argument(
-        "--from_pt",
-        action="store_true",
-        default=False,
-        help="Flag to indicate whether to convert models from PyTorch.",
-    )
-    parser.add_argument(
-        "--from_scratch",
-        action="store_true",
-        help="Train from scratch.",
-    )
-    parser.add_argument(
-        "--ema",
-        type=bool,
-        default=True,
-        help="Exponential moving average (long-term momentum conservation) of model parameters (True by default).",
-    )
-    parser.add_argument(
-        "--prompt",
-        type=str,
-        default=None,
-        help="Validation prompt.",
-    )
-    parser.add_argument(
-        "--plot_freq",
-        type=int,
-        default=1000,
-        help="Log plots at this frequency (1000 by default).",
-    )
-    parser.add_argument(
-        "--fid_freq",
-        type=int,
-        default=10000,
-        help="Log FID frequency.",
-    )
-    parser.add_argument(
-        "--precomputed_fid_stats",
-        type=bool,
-        default=True,
-        help="Precomputed FID stats.",
-    )
-    parser.add_argument(
-        "--unconditional",
-        action="store_true",
-        default=False,
-        help="Unconditional Generation.",
-    )
-    parser.add_argument(
-        "--toy",
-        action="store_true",
-        default=False,
-        help="Small dataset like CIFAR10.",
-    )
-
-    args = parser.parse_args()
-    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
-        args.local_rank = env_local_rank
-
-    # Sanity checks
-    if args.dataset_name is None and args.train_data_dir is None:
-        raise ValueError("Need either a dataset name or a training folder.")
-
-    return args
-
 
 dataset_name_mapping = {
     "poloclub/diffusiondb": ("image", "prompt"),
@@ -284,7 +45,7 @@ def get_params_to_save(params):
 
 
 def main():
-    args = parse_args()
+    args = sd14.get_config()
 
     writer = SummaryWriter(args.logging_dir)
     logging.basicConfig(
@@ -300,7 +61,7 @@ def main():
         transformers.utils.logging.set_verbosity_error()
 
     if args.seed is not None:
-        set_seed(args.seed)
+        transformers.set_seed(args.seed)
 
     # Handle the repository creation
     if jax.process_index() == 0:
@@ -317,14 +78,7 @@ def main():
 
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
-    if args.dataset_name == "imagenet":
-        import requests
-        headers = {"Authorization": f"Bearer {args.hub_token}"}
-        API_URL = "https://datasets-server.huggingface.co/parquet?dataset=imagenet-1k"
-        data = requests.get(API_URL, headers=headers).json()
-        data_files = [k["url"] for k in data["parquet_files"]]
-        dataset = load_dataset("parquet", data_files=data_files, split="train", token=args.hub_token)    
-    elif args.dataset_name is not None:
+    if args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
         dataset = load_dataset(
             args.dataset_name, args.dataset_config_name, cache_dir=args.cache_dir, data_dir=args.train_data_dir
@@ -383,7 +137,7 @@ def main():
         inputs = tokenizer(captions, max_length=tokenizer.model_max_length, padding="do_not_pad", truncation=True)
         input_ids = inputs.input_ids
         return input_ids
-    
+
     train_transforms = transforms.Compose(
         [
             transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -404,7 +158,7 @@ def main():
 
     if args.max_train_samples is not None:
         dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
-        # Set the training transforms
+    # Set the training transforms
     train_dataset = dataset["train"].with_transform(preprocess_train)
 
     def collate_fn(examples):
@@ -429,9 +183,12 @@ def main():
 
         return batch
 
-    total_train_batch_size = args.train_batch_size * jax.local_device_count()
+    total_train_batch_size = args.train_batch_size * jax.device_count()
+    time_gen = torch.Generator()
+    time_gen.manual_seed(int(time.time()))
+    sampler = torch.utils.data.sampler.RandomSampler(train_dataset, generator=time_gen)
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=total_train_batch_size, drop_last=True
+        train_dataset, collate_fn=collate_fn, batch_size=total_train_batch_size, drop_last=True,sampler=sampler
     )
 
     weight_dtype = jnp.float32
@@ -469,13 +226,13 @@ def main():
     if args.unconditional or args.toy:
         tokenizer = text_encoder = None
     else:
-        tokenizer = CLIPTokenizer.from_pretrained(
+        tokenizer = transformers.CLIPTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
             from_pt=args.from_pt,
             revision=args.revision,
             subfolder="tokenizer",
         )
-        text_encoder = FlaxCLIPTextModel.from_pretrained(
+        text_encoder = transformers.FlaxCLIPTextModel.from_pretrained(
             args.pretrained_model_name_or_path,
             from_pt=args.from_pt,
             revision=args.revision,
@@ -554,32 +311,26 @@ def main():
     num_inference_steps = 30
     H = args.resolution
     C = 3
-    num_samples = jax.device_count() # 8 
+    num_samples = jax.device_count() 
     prng_seed = jax.random.PRNGKey(104) # fixed seed for plotting
     prng_seed = jax.random.split(prng_seed, num_samples)
     if args.unconditional or args.toy:
         prompt_ids = 1 # batch_size
     else:
         prompt = num_samples * [args.prompt] if args.prompt is not None \
-                    else [ "A pikachu",
-                            "A cat",
-                            "A church",
-                            "A painting of a beautiful sunset over a calm lake.",
-                            "geodesic landscape, john chamberlain, christopher balaskas, tadao ando, 4 k",
-                            "hibiscus rosa - sinensis, hand painted",
-                            "A surreal dreamscape featuring floating islands, bizarre creatures, and a river that flows into the sky.",
-                            "A dome."]
+                    else [ "" ] * num_samples
         prompt_ids = pipeline.prepare_inputs(prompt)
         prompt_ids = shard(prompt_ids)
 
     # FID configurations
     if args.fid_freq:
-        fid_steps = 375 # fid_steps * 8 samples in total
+        fid_steps = 375
         rng, key = jax.random.split(rng)
         model = inception.InceptionV3(pretrained=True)
         fid_fn = functools.partial(model.apply, train=False)
         fid_fn_p = jax.pmap(fid_fn)
-        resize_fn = functools.partial(jax.image.resize,shape=(1, 256, 256, 3),method="bicubic") # 256x256 as is in most FID implementations for no obvious reasons
+        resize_fn = functools.partial(jax.image.resize,shape=(1, 256, 256, 3),method="bicubic") 
+        # 256x256 as is in most FID implementations
         resize_fn_p = jax.pmap(resize_fn)
         init_params = model.init(key, jnp.ones((1, H, H, C)))
         init_params_p = jax_utils.replicate(init_params)
@@ -620,7 +371,7 @@ def main():
             mu0 = np.mean(procs, axis=0)
             sigma0 = np.cov(procs, rowvar=False)
             np.savez(stats_path, mu=mu0, sigma=sigma0)
-            print('Saved pre-computed statistics at:', stats_path, '. Set --precomputed_fid_stats flag to skip it next time!')
+            print('Saved pre-computed statistics at:', stats_path, '. Set --precomputed_fid_stats flag to skip it.')
             del procs
     
     # Training function
@@ -743,7 +494,6 @@ def main():
         # train
         for batch in train_dataloader:
             batch = shard(batch) # CHW
-            
             state, train_metric, train_rngs = p_train_step(state, text_encoder_params, vae_params, batch, train_rngs)
 
             train_step_progress_bar.update(1)
