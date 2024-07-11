@@ -1,7 +1,8 @@
 /profile_default
-/sd-*
+*/sd-*
 /setup.py
 *.msgpack
+/sd-*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
