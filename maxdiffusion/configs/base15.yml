@@ -141,7 +141,7 @@ learning_rate: 1.e-7
 scale_lr: False
 max_train_samples: -1
 # max_train_steps takes priority over num_train_epochs.
-max_train_steps: 80000
+max_train_steps: 200000
 seed: 0
 output_dir: 'sd-model-finetuned'
 per_device_batch_size: 2
