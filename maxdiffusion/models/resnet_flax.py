@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable, Tuple, Union
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from maxdiffusion.models.act_flax import rcolu
 # Not sure which initializer to use, ruff was complaining, so added an ignore
 # from jax.nn import initializers # noqa: F811
 
@@ -99,6 +100,7 @@ class FlaxResnetBlock2D(nn.Module):
     use_nin_shortcut: bool = None
     dtype: jnp.dtype = jnp.float32
     norm_num_groups: int = 32
+    act_fn: str = "silu"
 
     def setup(self):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
@@ -152,22 +154,29 @@ class FlaxResnetBlock2D(nn.Module):
             )
         )
 
+        if self.act_fn == "silu":
+            self.act = nn.swish # ldm setting
+        elif self.act_fn == "rcolu":
+            self.act = rcolu
+        else:
+            raise ValueError(f"Unsupported activation function: {self.act_fn}")
+
     def __call__(self, hidden_states, temb, deterministic=True):
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = nn.swish(hidden_states)
+        hidden_states = self.act(hidden_states)
         hidden_states = self.conv1(hidden_states)
         hidden_states = nn.with_logical_constraint(
             hidden_states,
             ('batch', 'keep_1', 'keep_2', 'out_channels')
         )
 
-        temb = self.time_emb_proj(nn.swish(temb))
+        temb = self.time_emb_proj(self.act(temb))
         temb = jnp.expand_dims(jnp.expand_dims(temb, 1), 1)
         hidden_states = hidden_states + temb
 
         hidden_states = self.norm2(hidden_states)
-        hidden_states = nn.swish(hidden_states)
+        hidden_states = self.act(hidden_states)
         hidden_states = self.dropout(hidden_states, deterministic)
         hidden_states = self.conv2(hidden_states)
         hidden_states = nn.with_logical_constraint(

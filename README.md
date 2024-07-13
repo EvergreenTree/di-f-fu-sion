@@ -1,9 +1,9 @@
 # di-f-fu-sion
-minimum diffusion notebook for educational purpose
+Mechanics-inspired diffusion model structures and illustrative toy data notebooks for educational purposes.
 
 ## Train a Model
 ```
-PYTHONPATH=. python maxdiffusion/models/train.py maxdiffusion/configs/base_2_base.yml run_name=sd15 base_output_directory=gs://color-space/sd15
+PYTHONPATH=. python maxdiffusion/models/train.py maxdiffusion/configs/base15.yml 
 ```
 
 ## Multi-Host Configurations

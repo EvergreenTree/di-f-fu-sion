@@ -126,6 +126,28 @@ def vae_decode(latents, state, pipeline):
     image = (image / 2 + 0.5).clip(0, 1).transpose(0, 2, 3, 1)
     return image
 
+def run_inference(unet_state, vae_state, params, rng, config, batch_size, pipeline):
+
+    (latents,
+    context,
+    guidance_scale,
+    guidance_rescale,
+    scheduler_state) = get_unet_inputs(rng, config, batch_size, pipeline, params)
+
+    loop_body_p = functools.partial(loop_body, model=pipeline.unet,
+                                    pipeline=pipeline,
+                                    prompt_embeds=context,
+                                    guidance_scale=guidance_scale,
+                                    guidance_rescale=guidance_rescale)
+
+    vae_decode_p = functools.partial(vae_decode, pipeline=pipeline)
+
+    with mesh, nn_partitioning.axis_rules(config.logical_axis_rules):
+        latents, _, _ = jax.lax.fori_loop(0, config.num_inference_steps,
+                                        loop_body_p, (latents, scheduler_state, unet_state))
+        image = vae_decode_p(latents, vae_state)
+        return image
+        
 def run(config):
     rng = jax.random.PRNGKey(config.seed)
     # Setup Mesh
@@ -176,28 +198,6 @@ def run(config):
      vae_state_mesh_shardings) = get_states(mesh, None, rng, config, pipeline, params["unet"], params["vae"], training=False)
     del params["vae"]
     del params["unet"]
-
-    def run_inference(unet_state, vae_state, params, rng, config, batch_size, pipeline):
-
-        (latents,
-        context,
-        guidance_scale,
-        guidance_rescale,
-        scheduler_state) = get_unet_inputs(rng, config, batch_size, pipeline, params)
-
-        loop_body_p = functools.partial(loop_body, model=pipeline.unet,
-                                        pipeline=pipeline,
-                                        prompt_embeds=context,
-                                        guidance_scale=guidance_scale,
-                                        guidance_rescale=guidance_rescale)
-
-        vae_decode_p = functools.partial(vae_decode, pipeline=pipeline)
-
-        with mesh, nn_partitioning.axis_rules(config.logical_axis_rules):
-            latents, _, _ = jax.lax.fori_loop(0, config.num_inference_steps,
-                                            loop_body_p, (latents, scheduler_state, unet_state))
-            image = vae_decode_p(latents, vae_state)
-            return image
 
     p_run_inference = jax.jit(
         functools.partial(run_inference, rng=rng, config=config, batch_size=batch_size, pipeline=pipeline),

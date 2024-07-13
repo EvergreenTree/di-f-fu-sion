@@ -22,6 +22,8 @@ from jax.experimental import shard_map
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_mask
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_kernel
 
+from maxdiffusion.models.act_flax import rcolu
+
 from ..import common_types, max_logging
 
 Array = common_types.Array
@@ -515,6 +517,7 @@ class FlaxBasicTransformerBlock(nn.Module):
     flash_min_seq_length: int = 4096
     flash_block_sizes: BlockSizes = None
     mesh: jax.sharding.Mesh = None
+    act_fn: str = "silu"
 
     def setup(self):
         # self attention (or cross_attention if only_cross_attention is True)
@@ -545,7 +548,8 @@ class FlaxBasicTransformerBlock(nn.Module):
             mesh=self.mesh,
             dtype=self.dtype,
         )
-        self.ff = FlaxFeedForward(dim=self.dim, dropout=self.dropout, dtype=self.dtype)
+        self.ff = FlaxFeedForward(dim=self.dim, dropout=self.dropout, dtype=self.dtype,act_fn=self.act_fn)
+        self.scale = 1 / math.sqrt(self.dim)
         self.norm1 = nn.LayerNorm(epsilon=1e-5, dtype=self.dtype)
         self.norm2 = nn.LayerNorm(epsilon=1e-5, dtype=self.dtype)
         self.norm3 = nn.LayerNorm(epsilon=1e-5, dtype=self.dtype)
@@ -623,6 +627,7 @@ class FlaxTransformer2DModel(nn.Module):
     flash_block_sizes: BlockSizes = None
     mesh: jax.sharding.Mesh = None
     norm_num_groups: int = 32
+    act_fn: str = "silu"
 
     def setup(self):
         self.norm = nn.GroupNorm(num_groups=self.norm_num_groups, epsilon=1e-5)
@@ -661,7 +666,8 @@ class FlaxTransformer2DModel(nn.Module):
                 attention_kernel=self.attention_kernel,
                 flash_min_seq_length=self.flash_min_seq_length,
                 flash_block_sizes=self.flash_block_sizes,
-                mesh=self.mesh
+                mesh=self.mesh,
+                act_fn=self.act_fn,
             )
             for _ in range(self.depth)
         ]
@@ -725,11 +731,12 @@ class FlaxFeedForward(nn.Module):
     dim: int
     dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
+    act_fn: str = "silu"
 
     def setup(self):
         # The second linear layer needs to be called
         # net_2 for now to match the index of the Sequential layer
-        self.net_0 = FlaxGEGLU(self.dim, self.dropout, self.dtype)
+        self.net_0 = FlaxGEGLU(self.dim, self.dropout, self.dtype,act_fn=self.act_fn)
         self.net_2 = nn.Dense(self.dim, dtype=self.dtype)
 
     def __call__(self, hidden_states, deterministic=True):
@@ -754,13 +761,20 @@ class FlaxGEGLU(nn.Module):
     dim: int
     dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
+    act_fn: str = "silu"
 
     def setup(self):
         inner_dim = self.dim * 4
         self.proj = nn.Dense(inner_dim * 2, dtype=self.dtype)
         self.dropout_layer = nn.Dropout(rate=self.dropout)
+        if self.act_fn == "silu":
+            self.act = nn.gelu # ldm setting
+        elif self.act_fn == "rcolu":
+            self.act = rcolu
+        else:
+            raise ValueError(f"Unsupported activation function: {self.act_fn}")
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.proj(hidden_states)
         hidden_linear, hidden_gelu = jnp.split(hidden_states, 2, axis=2)
-        return self.dropout_layer(hidden_linear * nn.gelu(hidden_gelu), deterministic=deterministic)
+        return self.dropout_layer(hidden_linear * self.act(hidden_gelu), deterministic=deterministic)

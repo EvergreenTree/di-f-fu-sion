@@ -65,6 +65,9 @@ from maxdiffusion.input_pipeline.input_pipeline_interface import (
   make_laion400m_train_iterator
 )
 
+from jax_smi import initialise_tracking
+initialise_tracking()
+
 def get_shaped_batch(config, pipeline):
   """Return the shape of the batch - this is what eval_shape would return for the
   output of create_data_iterator_with_tokenizer, but eval_shape doesn't work, see b/306901078."""
@@ -204,7 +207,11 @@ def train(config):
     per_device_tflops = calculate_unet_tflops(config, pipeline, rng, train=True)
     max_logging.log(f"Per train step, estimated total TFLOPs will be {per_device_tflops:.2f}")
 
-    if config.dataset_name == "diffusers/pokemon-gpt4-captions":
+    if config.dataset_name == "laion400m":
+        data_iterator = make_laion400m_train_iterator(
+           config, mesh, total_train_batch_size
+        )
+    else:
         p_encode = None
         p_vae_apply = None
         if config.cache_latents_text_encoder_outputs:
@@ -224,10 +231,6 @@ def train(config):
            total_train_batch_size,
            tokenize_fn,
            image_transforms_fn
-        )
-    else:
-        data_iterator = make_laion400m_train_iterator(
-           config, mesh, total_train_batch_size
         )
 
     # Initialize our training
@@ -425,13 +428,13 @@ def train(config):
             feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
         )
 
-        params = {
+        final_params = {
             "text_encoder": get_params_to_save(params["text_encoder"]),
             "vae": get_params_to_save(params["vae"]),
             "unet": get_params_to_save(unet_state.params),
             "safety_checker": safety_checker.params,
         }
-        save_checkpoint(pipeline.save_pretrained, params, config, os.path.join(config.checkpoint_dir, checkpoint_name))
+        save_checkpoint(pipeline.save_pretrained, final_params, config, os.path.join(config.checkpoint_dir, checkpoint_name))
 
     max_utils.close_summary_writer(writer)
 

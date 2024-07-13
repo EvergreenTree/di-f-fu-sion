@@ -13,12 +13,12 @@
 # limitations under the License.
 
 # This sentinel is a reminder to choose a real run name.
-run_name: ''
+run_name: 'futurama'
 
 metrics_file: "" # for testing, local file that stores scalar metrics. If empty, no metrics are written.
 # If true save metrics such as loss and TFLOPS to GCS in {base_output_directory}/{run_name}/metrics/
 write_metrics: True
-gcs_metrics: True
+gcs_metrics: False
 # If true save config to GCS in {base_output_directory}/{run_name}/
 save_config_to_gcs: False
 log_period: 10000000000  # Flushes Tensorboard
@@ -69,7 +69,7 @@ diffusion_scheduler_config: {
 
 # Output directory
 # Create a GCS bucket, e.g. my-maxtext-outputs and set this to "gs://my-maxtext-outputs/"
-base_output_directory: ""
+base_output_directory: "gs://color-space/"
 
 # Parallelism
 mesh_axes: ['data', 'fsdp', 'tensor']
@@ -109,9 +109,10 @@ ici_tensor_parallelism: 1
 
 # Dataset
 # Replace with dataset path or train_data_dir. One has to be set.
-dataset_name: 'diffusers/pokemon-gpt4-captions'
+dataset_name: 'Norod78/
+futurama-blip-captions-512'
 # saves transformed dataset of dataset_name.
-dataset_save_location: '/tmp/pokemon-gpt4-captions_sd15'
+dataset_save_location: '/tmp/futurama-blip-captions-512'
 train_data_dir: ''
 dataset_config_name: ''
 cache_dir: ''
@@ -128,7 +129,7 @@ reuse_example_batch: False
 enable_data_shuffling: True
 
 # checkpoint every number of samples, -1 means don't checkpoint.
-checkpoint_every: -1
+checkpoint_every: -1 #409600 # reasonable time interval like tens of minutes
 upload_ckpts_to_gcs: False
 
 # Prepare image latents and text encoder outputs
@@ -137,16 +138,16 @@ cache_latents_text_encoder_outputs: True
 
 
 # Training loop
-learning_rate: 1.e-7
+learning_rate: 1.e-4
 scale_lr: False
 max_train_samples: -1
 # max_train_steps takes priority over num_train_epochs.
-max_train_steps: 200000
+max_train_steps: 3000
 seed: 0
-output_dir: 'sd-model-finetuned'
-per_device_batch_size: 2
+output_dir: 'sd-model-futurama'
+per_device_batch_size: 1
 
-warmup_steps_fraction: 0.0
+warmup_steps_fraction: 0.
 learning_rate_schedule_steps: -1 # By default the length of the schedule is set to the number of steps.
 
 # However you may choose a longer schedule (learning_rate_schedule_steps > steps), in which case the training will end before 
@@ -171,6 +172,7 @@ guidance_scale: 7.5
 # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
 guidance_rescale: 0.0
 num_inference_steps: 30
+num_samples_per_device: 1
 
 enable_mllog: False
 
