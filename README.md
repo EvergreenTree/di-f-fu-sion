@@ -43,22 +43,8 @@ end tell
 ```
 </details>
 
-<details>
-<summary>
-(Click to expand) Workaround to run jax in notebook on multi-host TPU pod: run `podrun -w -- python -c "import jax;jax.distributed.initialize()"` to initialize other nodes (however the process will halt after a while).
-</summary>
-
-```
-from src.podrun import podrun
-
-command = """import jax;jax.distributed.initialize()"""
-podrun(command)
-```
-
-</details>
-
-Run `ps -ef|grep python|grep USERNAME|grep -v grep|awk '{print $2}'|xargs sudo kill` on each node to clean processes if needed.
+Run `pkill -f process_name` or `ps -ef|grep python|grep USERNAME|grep -v grep|awk '{print $2}'|xargs sudo kill` on each node to clean hidden processes using TPU if needed.
 
 ## Single-Host Demo
 
-See `diffusion_lens.ipynb`
+See [](diffusion_lens.ipynb)

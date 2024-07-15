@@ -2,38 +2,54 @@ import functools
 import jax
 import jax.numpy as jnp
 from jax import nn
+from typing import Optional
 
-
-@functools.partial(jax.jit, static_argnames=['channel_axis','variant','eps','num_groups','share_axis'])
+@functools.partial(jax.jit, static_argnames=['channel_axis','variant','eps','num_groups','dim','share_axis'])
 def colu(input: jnp.ndarray, 
          channel_axis: int = -1, 
-         variant: str = "soft", 
+         variant: str = "hard", 
          eps: float = 1e-7, 
-         num_groups: int = 1, 
+         num_groups: Optional[int] = 1, 
+         dim: Optional[int] = None, 
          share_axis: bool = False
          ):
     """project the input x onto the axes dimension"""
+    """G=number of cones, S=dim of cones"""
     """output dimension = S = axes + cone sections = [len=(G or 1)] + G * [len=(S-1)]"""
-    if num_groups == 0: # trivial case
-        return input
-    num_channels = input.shape[channel_axis]
-    if (share_axis and num_groups == num_channels - 1) or (not share_axis and num_groups * 2 == num_channels): # pointwise case
+    """jnp.moveaxis is avoided to optimize speed on TPU"""
+    shape = input.shape
+    if len(shape) == 0:
+        return input # edge case
+    assert (dim is not None) ^ (num_groups is not None) # specify one of both, infer the other
+
+    if share_axis:
+        if dim is None:
+            assert (shape[channel_axis] - 1) % num_groups == 0
+            dim = (shape[channel_axis] - 1) // num_groups + 1
+        if num_groups is None:
+            assert (shape[channel_axis] - 1) % (dim - 1) == 0
+            num_groups = (shape[channel_axis] - 1) // (dim - 1)
+    else:
+        if dim is None:
+            assert shape[channel_axis] % num_groups == 0
+            dim = shape[channel_axis] // num_groups
+        if num_groups is None:
+            assert shape[channel_axis] % dim == 0
+            num_groups = shape[channel_axis] // dim
+
+    if dim == 2: # pointwise case
         return nn.silu(input) if variant == "soft" else nn.relu(input)
-    group_size = (num_channels - 1) // num_groups + 1 if share_axis else num_channels // num_groups
         
     # y = axes, x = cone sections
     if share_axis:
-        assert (num_channels - 1) % num_groups == 0, "Channel size must be a multiple of number of cones plus one"
         y, x = jnp.split(input, [1], axis=channel_axis)
     else:
-        assert num_channels % num_groups == 0, "Channel size must be a multiple of number of cones"
         y, x = jnp.split(input, [num_groups], axis=channel_axis)
-        group_size = num_channels // num_groups # S = C / G
 
     assert channel_axis < 0, "channel_axis must be negative" # Comply with broadcasting on first dimensions
     x_old_shape = x.shape
     y_old_shape = y.shape
-    x_shape = x.shape[:channel_axis] + (num_groups, group_size - 1) # NG(S-1)
+    x_shape = x.shape[:channel_axis] + (num_groups, dim - 1) # NG(S-1)
     if share_axis:
         y_shape = y.shape[:channel_axis] + (1, 1) # N11
     else: 
@@ -90,10 +106,8 @@ def rcolu(x,
           ):
     """dim=S, num_groups=S"""
     if len(x.shape) == 0:
-        return x # edge case
+        return x
     assert (dim is not None) ^ (num_groups is not None) # specify one of both
-    if axis != -1: # not recommended on TPU
-        x = jnp.moveaxis(x, axis, -1)
     shape = x.shape
     if dim is None:
         assert shape[-1] % num_groups == 0
@@ -101,6 +115,8 @@ def rcolu(x,
     if num_groups is None:
         assert shape[-1] % dim == 0
         num_groups = shape[-1] // dim
+    if axis != -1: 
+        x = jnp.moveaxis(x, axis, -1)
     new_shape = x.shape[:-1] + (num_groups, dim)
     x = x.reshape(new_shape)
     x = rcolu_(x,scaling,eps)
