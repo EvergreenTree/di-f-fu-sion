@@ -133,7 +133,8 @@ class HyperParameters(): # pylint: disable=missing-class-docstring
     return _config.keys[attr]
 
   def __setattr__(self, attr, value):
-    raise ValueError
+    _config.keys[attr] = value
+    # enable to fix manually setting lr_scaling in the training script...
 
   def get_keys(self):
     return _config.keys
@@ -146,4 +147,3 @@ def initialize(argv, **kwargs):
 if __name__ == "__main__":
   initialize(sys.argv)
   print(config.steps)
-  r = range(config.steps)

@@ -13,7 +13,8 @@
  See the License for the specific language governing permissions and
  limitations under the License.
  """
-
+import sys
+sys.path.append('.')
 import datetime
 import logging
 import os
@@ -56,13 +57,13 @@ from transformers import FlaxCLIPTextModel
 
 from maxdiffusion.pipelines.stable_diffusion import FlaxStableDiffusionSafetyChecker
 from flax.linen import partitioning as nn_partitioning
-from jax.sharding import Mesh
-from jax.sharding import PartitionSpec as P, PositionalSharding
+from jax.sharding import Mesh, PartitionSpec as P, PositionalSharding
 from transformers import CLIPImageProcessor, set_seed
 
 from maxdiffusion.input_pipeline.input_pipeline_interface import (
   make_pokemon_train_iterator,
-  make_laion400m_train_iterator
+  make_laion400m_train_iterator,
+  make_tf_train_iterator
 )
 
 from jax_smi import initialise_tracking
@@ -210,6 +211,12 @@ def train(config):
     if config.dataset_name == "laion400m":
         data_iterator = make_laion400m_train_iterator(
            config, mesh, total_train_batch_size
+        )
+    elif config.dataset_name == "cifar10":
+        data_iterator = make_tf_train_iterator(
+           config,
+           mesh,
+           total_train_batch_size,
         )
     else:
         p_encode = None
@@ -369,32 +376,39 @@ def train(config):
     mllog_utils.train_init_stop(config)
     mllog_utils.train_run_start(config)
     mllog_utils.train_step_start(config, start_step)
-    for step in np.arange(start_step, config.max_train_steps):
-        example_batch = load_next_batch(data_iterator, example_batch, config)
-        unet_state, train_metric, train_rngs = p_train_step(unet_state,
-                                                            vae_state,
-                                                            example_batch,
-                                                            train_rngs)
-        samples_count = total_train_batch_size * (step + 1)
-        new_time = datetime.datetime.now()
-        record_scalar_metrics(train_metric, new_time - last_step_completion, per_device_tflops, learning_rate_scheduler(step))
-        if config.write_metrics:
-            write_metrics(writer, local_metrics_file, running_gcs_metrics, train_metric, step, config)
-        last_step_completion = new_time
-        # Start profiling at end of first step to avoid compilation.
-        # Move before for loop to include.
-        if step == first_profiling_step:
-            max_utils.activate_profiler(config)
-        if step == last_profiling_step:
-            max_utils.deactivate_profiler(config)
+    try:
+        for step in np.arange(start_step, config.max_train_steps):
+            example_batch = load_next_batch(data_iterator, example_batch, config)
+            unet_state, train_metric, train_rngs = p_train_step(unet_state,
+                                                                vae_state,
+                                                                example_batch,
+                                                                train_rngs)
+            samples_count = total_train_batch_size * (step + 1)
+            new_time = datetime.datetime.now()
+            record_scalar_metrics(train_metric, new_time - last_step_completion, per_device_tflops, learning_rate_scheduler(step))
+            if config.write_metrics:
+                write_metrics(writer, local_metrics_file, running_gcs_metrics, train_metric, step, config)
+            last_step_completion = new_time
+            # Start profiling at end of first step to avoid compilation.
+            # Move before for loop to include.
+            if step == first_profiling_step:
+                max_utils.activate_profiler(config)
+            if step == last_profiling_step:
+                max_utils.deactivate_profiler(config)
 
-        mllog_utils.maybe_train_step_log(config, start_step, step, train_metric)
-        if step != 0 and config.checkpoint_every != -1 and samples_count % config.checkpoint_every == 0:
-            checkpoint_name = f"UNET-samples-{samples_count}"
-            save_checkpoint(pipeline.unet.save_pretrained,
-                            get_params_to_save(unet_state.params),
-                            config,
-                            os.path.join(config.checkpoint_dir, checkpoint_name))
+            mllog_utils.maybe_train_step_log(config, start_step, step, train_metric)
+            if jax.process_index() == 0 and step != 0 and config.checkpoint_every != -1 and samples_count % config.checkpoint_every == 0: # only the leading process checkpoint 
+                checkpoint_name = f"UNET-latest"
+                save_checkpoint(pipeline.unet.save_pretrained,
+                                get_params_to_save(unet_state.params),
+                                config,
+                                os.path.join(config.checkpoint_dir, checkpoint_name))
+    except Exception: # save at keyboardinterrupt
+        checkpoint_name = f"UNET-recovery"
+        save_checkpoint(pipeline.unet.save_pretrained,
+                        get_params_to_save(unet_state.params),
+                        config,
+                        os.path.join(config.checkpoint_dir, checkpoint_name))
 
     if config.write_metrics:
         write_metrics(writer, local_metrics_file, running_gcs_metrics, train_metric, step, config)
@@ -447,5 +461,6 @@ def main(argv: Sequence[str]) -> None:
     mllog_utils.train_init_start(config)
     validate_train_config(config)
     train(config)
+
 if __name__ == "__main__":
     app.run(main)

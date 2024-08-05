@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # This sentinel is a reminder to choose a real run name.
-run_name: ''
+run_name: 'unstable-pokemon'
 
 metrics_file: "" # for testing, local file that stores scalar metrics. If empty, no metrics are written.
 # If true save metrics such as loss and TFLOPS to GCS in {base_output_directory}/{run_name}/metrics/
@@ -30,7 +30,7 @@ dtype: 'bfloat16'
 # Set true to load weights from pytorch
 from_pt: True
 split_head_dim: True
-attention: 'flash' # Supported attention: dot_product, flash
+attention: 'dot_product' # Supported attention: dot_product, flash
 flash_block_sizes: {}
 # to override default block sizes for flash attention
 # flash_block_sizes:
@@ -81,7 +81,7 @@ diffusion_scheduler_config: {
 
 # Output directory
 # Create a GCS bucket, e.g. my-maxtext-outputs and set this to "gs://my-maxtext-outputs/"
-base_output_directory: ""
+base_output_directory: "gs://color-space"
 
 # Parallelism
 mesh_axes: ['data', 'fsdp', 'tensor']
@@ -122,8 +122,9 @@ ici_tensor_parallelism: 1
 # Dataset
 # Replace with dataset path or train_data_dir. One has to be set.
 dataset_name: 'diffusers/pokemon-gpt4-captions'
-# saves transformed dataset of dataset_name.
 dataset_save_location: '/tmp/pokemon-gpt4-captions'
+# dataset_name: 'laion400m'
+# dataset_save_location: '/nfs_data/laion400m'
 train_data_dir: ''
 dataset_config_name: ''
 cache_dir: ''
@@ -140,7 +141,7 @@ reuse_example_batch: False
 enable_data_shuffling: True
 
 # checkpoint every number of samples, -1 means don't checkpoint.
-checkpoint_every: -1
+checkpoint_every: 10000 # overwritten to save disk space
 upload_ckpts_to_gcs: False
 
 # Prepare image latents and text encoder outputs
@@ -149,16 +150,16 @@ cache_latents_text_encoder_outputs: True
 
 
 # Training loop
-learning_rate: 1.e-7
-scale_lr: False
+learning_rate: 1.25e-5
+scale_lr: True
 max_train_samples: -1
-max_train_steps: 20
+max_train_steps: 2000000
 seed: 0
 output_dir: 'sd-model-finetuned'
 tensorboard_dir: ''
-per_device_batch_size: 1
+per_device_batch_size: 1 # TODO: unet initialization shape should multiply this in multihost training
 
-warmup_steps_fraction: 0.0
+warmup_steps_fraction: 0.0005
 learning_rate_schedule_steps: -1 # By default the length of the schedule is set to the number of steps.
 
 # However you may choose a longer schedule (learning_rate_schedule_steps > steps), in which case the training will end before 
@@ -182,12 +183,14 @@ negative_prompt: "purple, red"
 guidance_scale: 7.5
 # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
 guidance_rescale: 0.0
-num_inference_steps: 30
+num_inference_steps: 50
+inference_per_device_batch_size: 1
+inference_from_pt: False
 
 # For preprocessing data to tfrecords
-data_files_pattern: ""
-extracted_files_dir: ""
-tfrecords_dir: ""
+data_files_pattern: "/home/evergreen/datasets/laion-400m/webdataset-filtered/*.tar"
+extracted_files_dir: "/home/evergreen/datasets/laion-400m/raw-data"
+tfrecords_dir: "/home/evergreen/datasets/laion-400m/tfrec"
 no_records_per_shard: 1000
 
 enable_mllog: False

@@ -31,6 +31,8 @@ python src/maxdiffusion/pedagogical_examples/to_tfrecords.py \
 """
 
 import os
+import sys
+sys.path.append('/home/evergreen/nfs_share/di-f-fu-sion')
 import glob
 import functools
 from absl import app
@@ -129,6 +131,7 @@ def generate_dataset(config, pipeline, p_encode, p_vae_apply):
   writer = tf.io.TFRecordWriter(
     tfrecords_dir + "/file_%.2i-%i.tfrec" % (tf_rec_num, (global_record_count + no_records_per_shard)))
   rng = jax.random.key(0)
+  print(filenames)
   for filename in filenames:
     extract_to_folder = filename.split("/")[-1].split(".")[0]
     extract_to_folder = os.path.join(extracted_files_dir,extract_to_folder)
@@ -156,6 +159,7 @@ def generate_dataset(config, pipeline, p_encode, p_vae_apply):
         writer = tf.io.TFRecordWriter(
           tfrecords_dir + "/file_%.2i-%i.tfrec" % (tf_rec_num, (global_record_count + no_records_per_shard)))
         shard_record_count = 0
+    print('file ', tf_rec_num,' done')
     tf_rec_num+=1
     os.remove(tmp_file)
     print("one record time: ", (time.time() - start))

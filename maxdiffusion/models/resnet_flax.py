@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable, Tuple, Union
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from maxdiffusion.models.act_flax import rcolu
+from maxdiffusion.models.act_flax import rcolu, colu
 # Not sure which initializer to use, ruff was complaining, so added an ignore
 # from jax.nn import initializers # noqa: F811
 
@@ -100,7 +100,7 @@ class FlaxResnetBlock2D(nn.Module):
     use_nin_shortcut: bool = None
     dtype: jnp.dtype = jnp.float32
     norm_num_groups: int = 32
-    act_fn: str = "silu"
+    act_fn: str = "relu"
 
     def setup(self):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
@@ -158,6 +158,10 @@ class FlaxResnetBlock2D(nn.Module):
             self.act = nn.swish # ldm setting
         elif self.act_fn == "rcolu":
             self.act = rcolu
+        elif self.act_fn == "colu":
+            self.act = colu
+        elif self.act_fn == "relu":
+            self.act = nn.relu
         else:
             raise ValueError(f"Unsupported activation function: {self.act_fn}")
 

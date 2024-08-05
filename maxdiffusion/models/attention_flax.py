@@ -767,12 +767,15 @@ class FlaxGEGLU(nn.Module):
         inner_dim = self.dim * 4
         self.proj = nn.Dense(inner_dim * 2, dtype=self.dtype)
         self.dropout_layer = nn.Dropout(rate=self.dropout)
-        if self.act_fn == "silu":
-            self.act = nn.gelu # ldm setting
-        elif self.act_fn == "rcolu":
-            self.act = rcolu
-        else:
-            raise ValueError(f"Unsupported activation function: {self.act_fn}")
+        self.act = nn.gelu # disable changing GEGLU variants
+        # if self.act_fn == "silu":
+        #     self.act = nn.gelu # ldm setting
+        # elif self.act_fn == "rcolu":
+        #     self.act = rcolu
+        # elif self.act_fn == "relu":
+        #     self.act = nn.relu
+        # else:
+        #     raise ValueError(f"Unsupported activation function: {self.act_fn}")
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.proj(hidden_states)

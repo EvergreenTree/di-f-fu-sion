@@ -154,7 +154,7 @@ def run(config):
     devices_array = create_device_mesh(config)
     mesh = Mesh(devices_array, config.mesh_axes)
 
-    batch_size = jax.device_count() * config.per_device_batch_size
+    batch_size = jax.device_count() * config.inference_per_device_batch_size
 
     weight_dtype = get_dtype(config)
     flash_block_sizes = get_flash_block_sizes(config)
@@ -164,7 +164,7 @@ def run(config):
         feature_extractor=None,
         split_head_dim=config.split_head_dim,
         norm_num_groups=config.norm_num_groups,
-        from_pt=config.from_pt,
+        from_pt=config.inference_from_pt,
         attention_kernel=config.attention,
         flash_block_sizes=flash_block_sizes,
         mesh=mesh
@@ -176,6 +176,7 @@ def run(config):
                 norm_num_groups=config.norm_num_groups,
                 attention_kernel=config.attention,
                 flash_block_sizes=flash_block_sizes,
+                from_pt=config.inference_from_pt,
                 mesh=mesh
             )
         params["unet"] = unet_params

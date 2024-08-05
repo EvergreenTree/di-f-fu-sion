@@ -141,14 +141,15 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     projection_class_embeddings_input_dim: Optional[int] = None
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conditional: bool = True
 
-    def init_weights(self, rng: jax.Array, eval_only: bool = False) -> FrozenDict:
+    def init_weights(self, rng: jax.Array, eval_only: bool = False, per_device_batch_size: int = 1) -> FrozenDict:
         # init input tensors
-        no_devices = jax.device_count()
-        sample_shape = (no_devices, self.in_channels, self.sample_size, self.sample_size)
+        no_devices = jax.local_device_count() # fixed from device_count() for local training
+        sample_shape = (no_devices, self.in_channels, self.sample_size, self.sample_size) if self.conditional else (no_devices * per_device_batch_size, self.in_channels, self.sample_size, self.sample_size)
         sample = jnp.zeros(sample_shape, dtype=jnp.float32)
         timesteps = jnp.ones((no_devices,), dtype=jnp.int32)
-        encoder_hidden_states = jnp.zeros((no_devices, 1, self.cross_attention_dim), dtype=jnp.float32)
+        encoder_hidden_states = jnp.zeros((no_devices, 1, self.cross_attention_dim), dtype=jnp.float32) if self.conditional else None
 
         params_rng, dropout_rng = jax.random.split(rng)
         rngs = {"params": params_rng, "dropout": dropout_rng}
@@ -359,10 +360,10 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
         self,
         sample,
         timesteps,
-        encoder_hidden_states,
+        encoder_hidden_states = None,
         added_cond_kwargs: Optional[Union[Dict, FrozenDict]] = None,
-        down_block_additional_residuals=None,
-        mid_block_additional_residual=None,
+        down_block_additional_residuals = None,
+        mid_block_additional_residual = None,
         return_dict: bool = True,
         train: bool = False,
     ) -> Union[FlaxUNet2DConditionOutput, Tuple]:
@@ -432,7 +433,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
         down_block_res_samples = (sample,)
         for down_block in self.down_blocks:
             if isinstance(down_block, FlaxCrossAttnDownBlock2D):
-                sample, res_samples = down_block(sample, t_emb, encoder_hidden_states, deterministic=not train)
+                sample, res_samples = down_block(sample, t_emb, encoder_hidden_states=encoder_hidden_states, deterministic=not train)
             else:
                 sample, res_samples = down_block(sample, t_emb, deterministic=not train)
             down_block_res_samples += res_samples

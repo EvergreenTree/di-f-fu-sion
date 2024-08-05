@@ -9,8 +9,8 @@ def colu(input: jnp.ndarray,
          channel_axis: int = -1, 
          variant: str = "hard", 
          eps: float = 1e-7, 
-         num_groups: Optional[int] = 1, 
-         dim: Optional[int] = None, 
+         num_groups: Optional[int] = None, 
+         dim: Optional[int] = 4, 
          share_axis: bool = False
          ):
     """project the input x onto the axes dimension"""

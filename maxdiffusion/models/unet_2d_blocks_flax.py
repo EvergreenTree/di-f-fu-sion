@@ -115,7 +115,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
         if self.add_downsample:
             self.downsamplers_0 = FlaxDownsample2D(self.out_channels, dtype=self.dtype)
 
-    def __call__(self, hidden_states, temb, encoder_hidden_states, deterministic=True):
+    def __call__(self, hidden_states, temb, encoder_hidden_states=None, deterministic=True):
         output_states = ()
 
         for resnet, attn in zip(self.resnets, self.attentions):
