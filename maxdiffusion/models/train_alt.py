@@ -85,7 +85,7 @@ def model_predict(state, x, x0, t, ddpm_params, self_condition, is_pred_x0, use_
 
     if is_pred_x0: # if the objective is is_pred_x0, pred == x0_pred
         x0_pred = pred
-        noise_pred =  x0_to_noise(pred, x, t, ddpm_params)
+        noise_pred = x0_to_noise(pred, x, t, ddpm_params)
     else:
         noise_pred = pred
         x0_pred = noise_to_x0(pred, x, t, ddpm_params)
@@ -269,6 +269,7 @@ def create_train_state(rng, config: ml_collections.ConfigDict):
       block_out_channels=config.model.block_out_channels,
       layers_per_block=config.model.layers_per_block,
       act_fn=config.model.act_fn,
+      conv3d=config.model.conv3d,
       )
 
   params = initialized(rng, model)

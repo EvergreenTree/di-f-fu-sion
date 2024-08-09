@@ -3,7 +3,7 @@ import ml_collections
 def get_config():
     config = ml_collections.ConfigDict()
 
-    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/cifar10-colu'
+    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/cifar10-conv3d-colu'
     config.wandb_artifact = None
 
     # wandb
@@ -11,7 +11,7 @@ def get_config():
     wandb.entity = None
     wandb.project = "ddpm-flax-cifar10-activation"
     wandb.job_type = "training"
-    wandb.name = 'colu' 
+    wandb.name = 'conv3d' 
     wandb.log_train = True
     wandb.log_sample = True
     wandb.log_model = True
@@ -58,9 +58,10 @@ def get_config():
 
     # model
     config.model = model = ml_collections.ConfigDict()
-    model.block_out_channels = (64,128,256,512)
+    model.block_out_channels = (256,256,256,256)
     model.layers_per_block = 1
     model.act_fn = 'colu'
+    model.conv3d = True
 
 
     # optim

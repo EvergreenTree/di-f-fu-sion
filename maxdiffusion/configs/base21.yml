@@ -137,11 +137,11 @@ cache_latents_text_encoder_outputs: True
 
 
 # Training loop
-learning_rate: 1.e-7
+learning_rate: 1.e-4
 scale_lr: False
 max_train_samples: -1
 # max_train_steps takes priority over num_train_epochs.
-max_train_steps: 800
+max_train_steps: 80000
 seed: 0
 output_dir: 'sd-model-finetuned'
 per_device_batch_size: 1

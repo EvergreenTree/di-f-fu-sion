@@ -72,6 +72,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
     transformer_layers_per_block: int = 1
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         resnets = []
@@ -86,7 +87,8 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             resnets.append(res_block)
 
@@ -105,7 +107,8 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
                 mesh=self.mesh,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             attentions.append(attn_block)
 
@@ -156,6 +159,7 @@ class FlaxDownBlock2D(nn.Module):
     dtype: jnp.dtype = jnp.float32
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         resnets = []
@@ -169,7 +173,8 @@ class FlaxDownBlock2D(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             resnets.append(res_block)
         self.resnets = resnets
@@ -244,6 +249,7 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
     transformer_layers_per_block: int = 1
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         resnets = []
@@ -259,7 +265,8 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             resnets.append(res_block)
 
@@ -278,7 +285,8 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
                 mesh=self.mesh,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             attentions.append(attn_block)
 
@@ -333,6 +341,7 @@ class FlaxUpBlock2D(nn.Module):
     dtype: jnp.dtype = jnp.float32
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         resnets = []
@@ -347,7 +356,8 @@ class FlaxUpBlock2D(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             resnets.append(res_block)
 
@@ -415,6 +425,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
     transformer_layers_per_block: int = 1
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         # there is always at least one resnet
@@ -425,7 +436,8 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
         ]
 
@@ -446,7 +458,8 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 mesh=self.mesh,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             attentions.append(attn_block)
 

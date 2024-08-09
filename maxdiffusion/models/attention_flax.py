@@ -22,7 +22,7 @@ from jax.experimental import shard_map
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_mask
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_kernel
 
-from maxdiffusion.models.act_flax import rcolu
+from maxdiffusion.models.act_flax import rcolu, colu, apply_conv
 
 from ..import common_types, max_logging
 
@@ -628,14 +628,36 @@ class FlaxTransformer2DModel(nn.Module):
     mesh: jax.sharding.Mesh = None
     norm_num_groups: int = 32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         self.norm = nn.GroupNorm(num_groups=self.norm_num_groups, epsilon=1e-5)
 
-        conv_kernel_init = nn.with_logical_partitioning(
-            nn.initializers.lecun_normal(),
-            ('keep_1', 'keep_2', 'conv_in','conv_out')
-        )
+        def conv():
+            if self.conv3d:
+                return nn.Conv(
+                    4,
+                    kernel_init=nn.with_logical_partitioning(
+                                    nn.initializers.lecun_normal(),
+                                    ('keep_1', 'keep_2', 'keep_3', 'conv_in','conv_out')
+                                ),
+                    kernel_size=(1, 1, 3),
+                    strides=(1, 1,1),
+                    padding=(0, 0, 1),
+                    dtype=self.dtype,
+                )
+            else:
+                return nn.Conv(
+                    inner_dim,
+                    kernel_init=nn.with_logical_partitioning(
+                                    nn.initializers.lecun_normal(),
+                                    ('keep_1', 'keep_2', 'conv_in','conv_out')
+                                ),
+                    kernel_size=(1, 1),
+                    strides=(1, 1),
+                    padding="VALID",
+                    dtype=self.dtype,
+                )
 
         inner_dim = self.n_heads * self.d_head
         if self.use_linear_projection:
@@ -644,14 +666,7 @@ class FlaxTransformer2DModel(nn.Module):
                 dtype=self.dtype
             )
         else:
-            self.proj_in = nn.Conv(
-                inner_dim,
-                kernel_init=conv_kernel_init,
-                kernel_size=(1, 1),
-                strides=(1, 1),
-                padding="VALID",
-                dtype=self.dtype,
-            )
+            self.proj_in = conv()
 
         self.transformer_blocks = [
             FlaxBasicTransformerBlock(
@@ -675,14 +690,7 @@ class FlaxTransformer2DModel(nn.Module):
         if self.use_linear_projection:
             self.proj_out = nn.Dense(inner_dim, dtype=self.dtype)
         else:
-            self.proj_out = nn.Conv(
-                inner_dim,
-                kernel_init=conv_kernel_init,
-                kernel_size=(1, 1),
-                strides=(1, 1),
-                padding="VALID",
-                dtype=self.dtype,
-            )
+            self.proj_out = conv()
 
         self.dropout_layer = nn.Dropout(rate=self.dropout)
 
@@ -694,7 +702,7 @@ class FlaxTransformer2DModel(nn.Module):
             hidden_states = hidden_states.reshape(batch, height * width, channels)
             hidden_states = self.proj_in(hidden_states)
         else:
-            hidden_states = self.proj_in(hidden_states)
+            hidden_states = apply_conv(self.proj_in,hidden_states,self.conv3d)
             hidden_states = hidden_states.reshape(batch, height * width, channels)
 
         for transformer_block in self.transformer_blocks:
@@ -705,7 +713,7 @@ class FlaxTransformer2DModel(nn.Module):
             hidden_states = hidden_states.reshape(batch, height, width, channels)
         else:
             hidden_states = hidden_states.reshape(batch, height, width, channels)
-            hidden_states = self.proj_out(hidden_states)
+            hidden_states = apply_conv(self.proj_out,hidden_states,self.conv3d)
 
         hidden_states = hidden_states + residual
         return self.dropout_layer(hidden_states, deterministic=deterministic)
@@ -779,5 +787,5 @@ class FlaxGEGLU(nn.Module):
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.proj(hidden_states)
-        hidden_linear, hidden_gelu = jnp.split(hidden_states, 2, axis=2)
+        hidden_linear, hidden_gelu = jnp.split(hidden_states, 2, axis=2) # should be -1 to be compatible with multiple batch dim
         return self.dropout_layer(hidden_linear * self.act(hidden_gelu), deterministic=deterministic)

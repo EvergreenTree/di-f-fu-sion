@@ -142,6 +142,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conditional: bool = True
+    conv3d: bool = False
 
     def init_weights(self, rng: jax.Array, eval_only: bool = False, per_device_batch_size: int = 1) -> FrozenDict:
         # init input tensors
@@ -263,6 +264,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     mesh=self.mesh,
                     dtype=self.dtype,
                     act_fn=self.act_fn,
+                    conv3d=self.conv3d,
                 )
             else:
                 down_block = FlaxDownBlock2D(
@@ -293,6 +295,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
             mesh=self.mesh,
             dtype=self.dtype,
             act_fn=self.act_fn,
+            conv3d=self.conv3d,
         )
 
         # up
@@ -329,6 +332,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     mesh=self.mesh,
                     dtype=self.dtype,
                     act_fn=self.act_fn,
+                    conv3d=self.conv3d,
                 )
             else:
                 up_block = FlaxUpBlock2D(
@@ -340,6 +344,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     dropout=self.dropout,
                     dtype=self.dtype,
                     act_fn=self.act_fn,
+                    conv3d=self.conv3d,
                 )
 
             up_blocks.append(up_block)

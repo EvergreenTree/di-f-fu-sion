@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable, Tuple, Union
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from maxdiffusion.models.act_flax import rcolu, colu
+from maxdiffusion.models.act_flax import rcolu, colu, apply_conv
 # Not sure which initializer to use, ruff was complaining, so added an ignore
 # from jax.nn import initializers # noqa: F811
 
@@ -25,7 +25,7 @@ from maxdiffusion.models.act_flax import rcolu, colu
 # Type annotations
 Array = jnp.ndarray
 DType = jnp.dtype
-Dtype = Any  # this could be a real type?
+Dtype = Any  # this could be a real type? --I guess Object is better...
 PRNGKey = jnp.ndarray
 Shape = Iterable[int]
 Activation = Callable[..., Array]
@@ -38,6 +38,8 @@ NdInitializer = Callable[
 class FlaxUpsample2D(nn.Module):
     out_channels: int
     dtype: jnp.dtype = jnp.float32
+    conv3d: bool = False
+
     def setup(self):
         self.conv = nn.Conv(
             self.out_channels,
@@ -70,6 +72,7 @@ class FlaxUpsample2D(nn.Module):
 class FlaxDownsample2D(nn.Module):
     out_channels: int
     dtype: jnp.dtype = jnp.float32
+    conv3d: bool = False
 
     def setup(self):
         self.conv = nn.Conv(
@@ -101,6 +104,7 @@ class FlaxResnetBlock2D(nn.Module):
     dtype: jnp.dtype = jnp.float32
     norm_num_groups: int = 32
     act_fn: str = "relu"
+    conv3d: bool = False
 
     def setup(self):
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
@@ -121,38 +125,44 @@ class FlaxResnetBlock2D(nn.Module):
                 padding="VALID",
                 dtype=self.dtype,
                 kernel_init = nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-            )
+                    nn.initializers.lecun_normal(),
+                    ('keep_1', 'keep_2', 'conv_in', 'conv_out')
+                )
             )
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
-        self.conv1 = nn.Conv(
-            out_channels,
-            kernel_size=(3, 3),
-            strides=(1, 1),
-            padding=((1, 1), (1, 1)),
-            dtype=self.dtype,
-            kernel_init = nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-            )
-        )
+
+        def conv(conv3d):
+            if conv3d:
+                return nn.Conv(
+                    4,
+                    kernel_size=(3, 3, 3),
+                    strides=(1, 1, 1),
+                    padding='CIRCULAR',
+                    dtype=self.dtype,
+                    kernel_init = nn.with_logical_partitioning(
+                        nn.initializers.glorot_normal(),
+                        ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                    )
+                )
+            else:
+                return nn.Conv(
+                    out_channels,
+                    kernel_size=(3, 3),
+                    strides=(1, 1),
+                    padding=((1, 1), (1, 1)),
+                    dtype=self.dtype,
+                    kernel_init = nn.with_logical_partitioning(
+                        nn.initializers.lecun_normal(),
+                        ('keep_1', 'keep_2', 'conv_in', 'conv_out')
+                    )
+                )
+        self.conv1 = conv(conv3d=False) if self.in_channels != self.out_channels else conv(self.conv3d)
 
         self.time_emb_proj = nn.Dense(
            out_channels,
            dtype=self.dtype,
            )
-        self.conv2 = nn.Conv(
-            out_channels,
-            kernel_size=(3, 3),
-            strides=(1, 1),
-            padding=((1, 1), (1, 1)),
-            dtype=self.dtype,
-            kernel_init = nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-            )
-        )
+        self.conv2 = conv(self.conv3d)
 
         if self.act_fn == "silu":
             self.act = nn.swish # ldm setting
@@ -169,7 +179,7 @@ class FlaxResnetBlock2D(nn.Module):
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.act(hidden_states)
-        hidden_states = self.conv1(hidden_states)
+        hidden_states = apply_conv(self.conv1, hidden_states, conv3d=False if self.in_channels != self.out_channels else self.conv3d)
         hidden_states = nn.with_logical_constraint(
             hidden_states,
             ('batch', 'keep_1', 'keep_2', 'out_channels')
@@ -182,7 +192,7 @@ class FlaxResnetBlock2D(nn.Module):
         hidden_states = self.norm2(hidden_states)
         hidden_states = self.act(hidden_states)
         hidden_states = self.dropout(hidden_states, deterministic)
-        hidden_states = self.conv2(hidden_states)
+        hidden_states = apply_conv(self.conv2, hidden_states, self.conv3d)
         hidden_states = nn.with_logical_constraint(
             hidden_states,
             ('batch', 'keep_1', 'keep_2', 'out_channels')

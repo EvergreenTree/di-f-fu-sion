@@ -132,3 +132,15 @@ def rcolu(x,
 # # some assertion 
 # y1 = jnp.sum(y,axis=-1,keepdims=True) / jnp.sqrt(3) # dot(y, e)
 # jnp.linalg.norm(y) / y1
+
+def apply_conv(conv,x,conv3d=False):
+    if conv3d:
+        x_shape = x.shape
+        assert x_shape[-1] % 4 == 0
+        x_new_shape = x_shape[:-1] + (x_shape[-1]//4, 4)
+        x = x.reshape(x_new_shape)
+        x = conv(x)
+        x = x.reshape(x_shape)
+        return x
+    else:
+        return conv(x)

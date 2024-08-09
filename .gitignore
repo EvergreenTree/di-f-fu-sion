@@ -4,6 +4,8 @@
 /setup.py
 *.msgpack
 */wandb
+/wandb
+/cifar10-*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

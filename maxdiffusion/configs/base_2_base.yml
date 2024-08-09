@@ -25,7 +25,7 @@ log_period: 10000000000  # Flushes Tensorboard
 
 pretrained_model_name_or_path: 'stabilityai/stable-diffusion-2-base'
 unet_checkpoint: ''
-revision: 'main'
+revision: 'fp16'
 dtype: 'bfloat16'
 # Set true to load weights from pytorch
 from_pt: True
@@ -184,8 +184,6 @@ guidance_scale: 7.5
 # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
 guidance_rescale: 0.0
 num_inference_steps: 50
-inference_per_device_batch_size: 1
-inference_from_pt: False
 
 # For preprocessing data to tfrecords
 data_files_pattern: "/home/evergreen/datasets/laion-400m/webdataset-filtered/*.tar"
