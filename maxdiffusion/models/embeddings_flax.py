@@ -16,6 +16,7 @@ import math
 import flax.linen as nn
 import jax.numpy as jnp
 
+from .act_flax import make_conv, colu, rcolu
 
 def get_sinusoidal_embeddings(
     timesteps: jnp.ndarray,
@@ -65,14 +66,26 @@ class FlaxTimestepEmbedding(nn.Module):
         dtype (:obj:`jnp.dtype`, *optional*, defaults to jnp.float32):
                 Parameters `dtype`
     """
-    time_embed_dim: int = 32
+    time_embed_dim: int = 32 # in practice, block_out_channels[0] * 4
     dtype: jnp.dtype = jnp.float32
+    act_fn: str = 'silu'
+    conv3d: bool = False
+    # TODO: match the state space to Fourier basis by enabling conv3d
 
     @nn.compact
     def __call__(self, temb):
-        temb = nn.Dense(self.time_embed_dim, dtype=self.dtype, name="linear_1")(temb)
-        temb = nn.silu(temb)
-        temb = nn.Dense(self.time_embed_dim, dtype=self.dtype, name="linear_2")(temb)
+        temb = make_conv('dense',conv3d=False, out_channels=self.time_embed_dim, dtype=self.dtype, name="linear_1")(temb) # disable since temb Fourier bases does not match word vectors
+        if self.act_fn == 'silu':
+            temb = nn.silu(temb)
+        elif self.act_fn == 'relu':
+            temb = nn.silu(temb)
+        elif self.act_fn == 'colu':
+            temb = colu(temb)
+        elif self.act_fn == 'rcolu':
+            temb = rcolu(temb)
+        else:
+            raise NotImplementedError
+        temb = make_conv('dense',conv3d=self.conv3d, out_channels=self.time_embed_dim, dtype=self.dtype, name="linear_2")(temb)
         return temb
 
 
@@ -84,7 +97,7 @@ class FlaxTimesteps(nn.Module):
         dim (`int`, *optional*, defaults to `32`):
                 Time step embedding dimension
     """
-    dim: int = 32
+    dim: int = 32 # in practice, block_out_channels[0]
     flip_sin_to_cos: bool = False
     freq_shift: float = 1
 

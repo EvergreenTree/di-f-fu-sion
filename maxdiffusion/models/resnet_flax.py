@@ -17,8 +17,8 @@ from typing import Any, Callable, Iterable, Tuple, Union
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from maxdiffusion.models.act_flax import rcolu, colu, apply_conv
-# Not sure which initializer to use, ruff was complaining, so added an ignore
+from maxdiffusion.models.act_flax import rcolu, colu, make_conv
+# Not sure which initializer to use, ruff was complaining, so added an ignore --I prefer xavier to lecun init... (we care about out_channels in generative models!)
 # from jax.nn import initializers # noqa: F811
 
 
@@ -32,8 +32,7 @@ Activation = Callable[..., Array]
 # Parameter initializers.
 Initializer = Callable[[PRNGKey, Shape, DType], Array]
 InitializerAxis = Union[int, Tuple[int, ...]]
-NdInitializer = Callable[
-    [PRNGKey, Shape, DType, InitializerAxis, InitializerAxis], Array]
+NdInitializer = Callable[[PRNGKey, Shape, DType, InitializerAxis, InitializerAxis], Array]
 
 class FlaxUpsample2D(nn.Module):
     out_channels: int
@@ -41,17 +40,7 @@ class FlaxUpsample2D(nn.Module):
     conv3d: bool = False
 
     def setup(self):
-        self.conv = nn.Conv(
-            self.out_channels,
-            kernel_size=(3, 3),
-            strides=(1, 1),
-            padding=((1, 1), (1, 1)),
-            dtype=self.dtype,
-            kernel_init = nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-            )
-        )
+        self.conv = make_conv('1x1',conv3d=self.conv3d,out_channels=self.out_channels,dtype=self.dtype,)
 
     @nn.compact
     def __call__(self, hidden_states):
@@ -75,17 +64,7 @@ class FlaxDownsample2D(nn.Module):
     conv3d: bool = False
 
     def setup(self):
-        self.conv = nn.Conv(
-            self.out_channels,
-            kernel_size=(3, 3),
-            strides=(2, 2),
-            padding=((1, 1), (1, 1)),  # padding="VALID",
-            dtype=self.dtype,
-            kernel_init = nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-            )
-        )
+        self.conv = make_conv('down', conv3d=self.conv3d, out_channels=self.out_channels, dtype=self.dtype,)
     @nn.compact
     def __call__(self, hidden_states):
         hidden_states = self.conv(hidden_states)
@@ -118,51 +97,14 @@ class FlaxResnetBlock2D(nn.Module):
 
         self.conv_shortcut = None
         if use_nin_shortcut:
-            self.conv_shortcut = nn.Conv(
-                out_channels,
-                kernel_size=(1, 1),
-                strides=(1, 1),
-                padding="VALID",
-                dtype=self.dtype,
-                kernel_init = nn.with_logical_partitioning(
-                    nn.initializers.lecun_normal(),
-                    ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-                )
-            )
+            self.conv_shortcut = make_conv('1x1', conv3d=self.conv3d, out_channels=self.out_channels, in_channels=self.in_channels, dtype=self.dtype,)
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
 
-        def conv(conv3d):
-            if conv3d:
-                return nn.Conv(
-                    4,
-                    kernel_size=(3, 3, 3),
-                    strides=(1, 1, 1),
-                    padding='CIRCULAR',
-                    dtype=self.dtype,
-                    kernel_init = nn.with_logical_partitioning(
-                        nn.initializers.glorot_normal(),
-                        ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
-                    )
-                )
-            else:
-                return nn.Conv(
-                    out_channels,
-                    kernel_size=(3, 3),
-                    strides=(1, 1),
-                    padding=((1, 1), (1, 1)),
-                    dtype=self.dtype,
-                    kernel_init = nn.with_logical_partitioning(
-                        nn.initializers.lecun_normal(),
-                        ('keep_1', 'keep_2', 'conv_in', 'conv_out')
-                    )
-                )
-        self.conv1 = conv(conv3d=False) if self.in_channels != self.out_channels else conv(self.conv3d)
+        self.conv1 = make_conv('3x3', conv3d=self.conv3d, out_channels=self.out_channels, in_channels=self.in_channels, dtype=self.dtype,)
 
-        self.time_emb_proj = nn.Dense(
-           out_channels,
-           dtype=self.dtype,
-           )
-        self.conv2 = conv(self.conv3d)
+        self.time_emb_proj = make_conv('dense',conv3d=self.conv3d, out_channels=self.out_channels, dtype=self.dtype,) 
+        
+        self.conv2 = make_conv('3x3', conv3d=self.conv3d, out_channels=self.out_channels, dtype=self.dtype,)
 
         if self.act_fn == "silu":
             self.act = nn.swish # ldm setting
@@ -173,32 +115,32 @@ class FlaxResnetBlock2D(nn.Module):
         elif self.act_fn == "relu":
             self.act = nn.relu
         else:
-            raise ValueError(f"Unsupported activation function: {self.act_fn}")
+            raise NotImplementedError #ValueError(f"Unsupported activation function: {self.act_fn}")
 
     def __call__(self, hidden_states, temb, deterministic=True):
-        residual = hidden_states
+        skip = hidden_states # not residual!
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.act(hidden_states)
-        hidden_states = apply_conv(self.conv1, hidden_states, conv3d=False if self.in_channels != self.out_channels else self.conv3d)
+        hidden_states = self.conv1(hidden_states)
         hidden_states = nn.with_logical_constraint(
             hidden_states,
             ('batch', 'keep_1', 'keep_2', 'out_channels')
         )
-
+        
         temb = self.time_emb_proj(self.act(temb))
-        temb = jnp.expand_dims(jnp.expand_dims(temb, 1), 1)
+        temb = temb[...,None,None,:]
         hidden_states = hidden_states + temb
 
         hidden_states = self.norm2(hidden_states)
         hidden_states = self.act(hidden_states)
         hidden_states = self.dropout(hidden_states, deterministic)
-        hidden_states = apply_conv(self.conv2, hidden_states, self.conv3d)
+        hidden_states = self.conv2(hidden_states)
         hidden_states = nn.with_logical_constraint(
             hidden_states,
             ('batch', 'keep_1', 'keep_2', 'out_channels')
         )
 
         if self.conv_shortcut is not None:
-            residual = self.conv_shortcut(residual)
+            skip = self.conv_shortcut(skip)
 
-        return hidden_states + residual
+        return hidden_states + skip

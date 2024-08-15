@@ -94,7 +94,6 @@ def model_predict(state, x, x0, t, ddpm_params, self_condition, is_pred_x0, use_
 
 
 def ddpm_sample_step(state, rng, x, t, x0_last, ddpm_params, self_condition=False, is_pred_x0=False):
-
     batched_t = jnp.ones((x.shape[0],), dtype=jnp.int32) * t
     
     if self_condition:
@@ -129,8 +128,6 @@ def sample_loop(rng, state, shape, p_sample_step, timesteps):
     img = unnormalize_to_zero_to_one(jnp.asarray(x0))
 
     return img
-
-
 
 def flatten(x):
   return x.reshape(x.shape[0], -1)
@@ -270,6 +267,8 @@ def create_train_state(rng, config: ml_collections.ConfigDict):
       layers_per_block=config.model.layers_per_block,
       act_fn=config.model.act_fn,
       conv3d=config.model.conv3d,
+      up_skip=config.model.up_skip,
+      cross_attention_dim=config.model.cross_attention_dim,
       )
 
   params = initialized(rng, model)
@@ -593,7 +592,8 @@ def to_wandb_config(d: ConfigDict, parent_key: str = '', sep: str ='.'):
             items.append((new_key, v))
     return dict(items)
 
-
-
-  
-
+if __name__ == '__main__': # test the unet parameters
+    from maxdiffusion.configs.cifar10 import get_config
+    config = get_config()
+    state = create_train_state(jax.random.PRNGKey(0),config)
+    print(jax.tree.map(lambda x: x.shape,state.params))

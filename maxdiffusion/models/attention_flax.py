@@ -22,7 +22,7 @@ from jax.experimental import shard_map
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_mask
 from jax.experimental.pallas.ops.tpu.splash_attention import splash_attention_kernel
 
-from maxdiffusion.models.act_flax import rcolu, colu, apply_conv
+from maxdiffusion.models.act_flax import rcolu, colu, make_conv
 
 from ..import common_types, max_logging
 
@@ -386,13 +386,15 @@ class FlaxAttention(nn.Module):
     key_axis_names: AxisNames = (BATCH, LENGTH, HEAD)
     value_axis_names: AxisNames = (BATCH, LENGTH, HEAD)
     out_axis_names: AxisNames = (BATCH, LENGTH, HEAD)
+    conv3d: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
 
         if self.attention_kernel == "flash" and self.mesh is None:
             raise ValueError(f"The flash attention kernel requires a value for mesh, but mesh is {self.mesh}")
 
-        inner_dim = self.dim_head * self.heads
+        inner_dim = self.dim_head * self.heads # assert in_channels == inner_dim
         scale = self.dim_head**-0.5
 
         self.attention_op = AttentionOp(
@@ -408,42 +410,13 @@ class FlaxAttention(nn.Module):
             dtype=self.dtype
         )
 
-        qkv_init_kernel = nn.with_logical_partitioning(
-            nn.initializers.lecun_normal(),
-            ("embed","heads")
-        )
+        self.query = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim,dtype=self.dtype,name="to_q")
 
-        self.query = nn.Dense(
-            inner_dim,
-            kernel_init=qkv_init_kernel,
-            use_bias=False,
-            dtype=self.dtype,
-            name="to_q"
-        )
+        self.key = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim,in_channels=self.cross_attention_dim,dtype=self.dtype,name="to_k")
 
-        self.key = nn.Dense(
-            inner_dim,
-            kernel_init=qkv_init_kernel,
-            use_bias=False,
-            dtype=self.dtype,
-            name="to_k"
-        )
+        self.value = make_conv('dense',conv3d=self.conv3d,out_channels=self.query_dim,in_channels=self.cross_attention_dim,dtype=self.dtype,name="to_v")
 
-        self.value = nn.Dense(
-            inner_dim,
-            kernel_init=qkv_init_kernel,
-            use_bias=False,
-            dtype=self.dtype,
-            name="to_v")
-
-        self.proj_attn = nn.Dense(
-            self.query_dim,
-            kernel_init=nn.with_logical_partitioning(
-                nn.initializers.lecun_normal(),
-                ("heads","embed")
-            ),
-            dtype=self.dtype,
-            name="to_out_0")
+        self.proj_attn = make_conv('dense',conv3d=self.conv3d,out_channels=self.query_dim,dtype=self.dtype,name="to_out_0")
         self.dropout_layer = nn.Dropout(rate=self.dropout)
 
     def __call__(self, hidden_states, context=None, deterministic=True):
@@ -518,6 +491,8 @@ class FlaxBasicTransformerBlock(nn.Module):
     flash_block_sizes: BlockSizes = None
     mesh: jax.sharding.Mesh = None
     act_fn: str = "silu"
+    conv3d: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
         # self attention (or cross_attention if only_cross_attention is True)
@@ -533,6 +508,8 @@ class FlaxBasicTransformerBlock(nn.Module):
             flash_block_sizes=self.flash_block_sizes,
             mesh=self.mesh,
             dtype=self.dtype,
+            conv3d=self.conv3d,
+            cross_attention_dim=self.cross_attention_dim,
         )
         # cross attention
         self.attn2 = FlaxAttention(
@@ -547,8 +524,10 @@ class FlaxBasicTransformerBlock(nn.Module):
             flash_block_sizes=self.flash_block_sizes,
             mesh=self.mesh,
             dtype=self.dtype,
+            conv3d=self.conv3d,
+            cross_attention_dim=self.cross_attention_dim,
         )
-        self.ff = FlaxFeedForward(dim=self.dim, dropout=self.dropout, dtype=self.dtype,act_fn=self.act_fn)
+        self.ff = FlaxFeedForward(dim=self.dim, dropout=self.dropout, dtype=self.dtype,act_fn=self.act_fn,conv3d=self.conv3d,)
         self.scale = 1 / math.sqrt(self.dim)
         self.norm1 = nn.LayerNorm(epsilon=1e-5, dtype=self.dtype)
         self.norm2 = nn.LayerNorm(epsilon=1e-5, dtype=self.dtype)
@@ -557,22 +536,22 @@ class FlaxBasicTransformerBlock(nn.Module):
 
     def __call__(self, hidden_states, context, deterministic=True):
         # self attention
-        residual = hidden_states
+        skip = hidden_states # cq: this is not called residual!
         if self.only_cross_attention:
             hidden_states = self.attn1(self.norm1(hidden_states), context, deterministic=deterministic)
         else:
             hidden_states = self.attn1(self.norm1(hidden_states), deterministic=deterministic)
-        hidden_states = hidden_states + residual
+        hidden_states = hidden_states + skip
 
         # cross attention
-        residual = hidden_states
+        skip = hidden_states
         hidden_states = self.attn2(self.norm2(hidden_states), context, deterministic=deterministic)
-        hidden_states = hidden_states + residual
+        hidden_states = hidden_states + skip
 
         # feed forward
-        residual = hidden_states
+        skip = hidden_states
         hidden_states = self.ff(self.norm3(hidden_states), deterministic=deterministic)
-        hidden_states = hidden_states + residual
+        hidden_states = hidden_states + skip
 
         return self.dropout_layer(hidden_states, deterministic=deterministic)
 
@@ -629,44 +608,16 @@ class FlaxTransformer2DModel(nn.Module):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conv3d: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
         self.norm = nn.GroupNorm(num_groups=self.norm_num_groups, epsilon=1e-5)
 
-        def conv():
-            if self.conv3d:
-                return nn.Conv(
-                    4,
-                    kernel_init=nn.with_logical_partitioning(
-                                    nn.initializers.lecun_normal(),
-                                    ('keep_1', 'keep_2', 'keep_3', 'conv_in','conv_out')
-                                ),
-                    kernel_size=(1, 1, 3),
-                    strides=(1, 1,1),
-                    padding=(0, 0, 1),
-                    dtype=self.dtype,
-                )
-            else:
-                return nn.Conv(
-                    inner_dim,
-                    kernel_init=nn.with_logical_partitioning(
-                                    nn.initializers.lecun_normal(),
-                                    ('keep_1', 'keep_2', 'conv_in','conv_out')
-                                ),
-                    kernel_size=(1, 1),
-                    strides=(1, 1),
-                    padding="VALID",
-                    dtype=self.dtype,
-                )
-
         inner_dim = self.n_heads * self.d_head
         if self.use_linear_projection:
-            self.proj_in = nn.Dense(
-                inner_dim,
-                dtype=self.dtype
-            )
+            self.proj_in = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
         else:
-            self.proj_in = conv()
+            self.proj_in = make_conv('1x1',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
 
         self.transformer_blocks = [
             FlaxBasicTransformerBlock(
@@ -683,26 +634,28 @@ class FlaxTransformer2DModel(nn.Module):
                 flash_block_sizes=self.flash_block_sizes,
                 mesh=self.mesh,
                 act_fn=self.act_fn,
+                conv3d=self.conv3d,
+                cross_attention_dim=self.cross_attention_dim,
             )
             for _ in range(self.depth)
         ]
 
         if self.use_linear_projection:
-            self.proj_out = nn.Dense(inner_dim, dtype=self.dtype)
+            self.proj_out = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
         else:
-            self.proj_out = conv()
+            self.proj_out = make_conv('1x1',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
 
         self.dropout_layer = nn.Dropout(rate=self.dropout)
 
     def __call__(self, hidden_states, context, deterministic=True):
         batch, height, width, channels = hidden_states.shape
-        residual = hidden_states
+        skip = hidden_states
         hidden_states = self.norm(hidden_states)
-        if self.use_linear_projection:
-            hidden_states = hidden_states.reshape(batch, height * width, channels)
+        if self.use_linear_projection: 
+            hidden_states = hidden_states.reshape(batch, height * width, channels) # cq: you don't have to put h*w together in fact
             hidden_states = self.proj_in(hidden_states)
         else:
-            hidden_states = apply_conv(self.proj_in,hidden_states,self.conv3d)
+            hidden_states = self.proj_in(hidden_states)
             hidden_states = hidden_states.reshape(batch, height * width, channels)
 
         for transformer_block in self.transformer_blocks:
@@ -713,9 +666,9 @@ class FlaxTransformer2DModel(nn.Module):
             hidden_states = hidden_states.reshape(batch, height, width, channels)
         else:
             hidden_states = hidden_states.reshape(batch, height, width, channels)
-            hidden_states = apply_conv(self.proj_out,hidden_states,self.conv3d)
+            hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states + residual
+        hidden_states = hidden_states + skip
         return self.dropout_layer(hidden_states, deterministic=deterministic)
 
 
@@ -740,12 +693,13 @@ class FlaxFeedForward(nn.Module):
     dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         # The second linear layer needs to be called
         # net_2 for now to match the index of the Sequential layer
-        self.net_0 = FlaxGEGLU(self.dim, self.dropout, self.dtype,act_fn=self.act_fn)
-        self.net_2 = nn.Dense(self.dim, dtype=self.dtype)
+        self.net_0 = FlaxGEGLU(self.dim, self.dropout, self.dtype,act_fn=self.act_fn,conv3d=self.conv3d)
+        self.net_2 = make_conv('convex',conv3d=self.conv3d,out_channels=self.dim, dtype=self.dtype) # TODO: enable conv3d for apple-to-apple ablation study
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.net_0(hidden_states, deterministic=deterministic)
@@ -770,12 +724,14 @@ class FlaxGEGLU(nn.Module):
     dropout: float = 0.0
     dtype: jnp.dtype = jnp.float32
     act_fn: str = "silu"
+    conv3d: bool = False
 
     def setup(self):
         inner_dim = self.dim * 4
-        self.proj = nn.Dense(inner_dim * 2, dtype=self.dtype)
+        # disable conv3d for fair ablation study
+        self.proj = make_conv('concave',conv3d=self.conv3d,in_channels = self.dim, out_channels=inner_dim * 2,dtype=self.dtype,) # cq: TODO: when conv3d=True, make it two separate conv(x4 channels) --done
         self.dropout_layer = nn.Dropout(rate=self.dropout)
-        self.act = nn.gelu # disable changing GEGLU variants
+        self.act = nn.gelu # cq: TODO: uncomment the following to change GEGLU variants!
         # if self.act_fn == "silu":
         #     self.act = nn.gelu # ldm setting
         # elif self.act_fn == "rcolu":
@@ -787,5 +743,5 @@ class FlaxGEGLU(nn.Module):
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.proj(hidden_states)
-        hidden_linear, hidden_gelu = jnp.split(hidden_states, 2, axis=2) # should be -1 to be compatible with multiple batch dim
+        hidden_linear, hidden_gelu = jnp.split(hidden_states, 2, axis=-1) # cq: axis should be -1, not 2, to be compatible with multiple batch dim
         return self.dropout_layer(hidden_linear * self.act(hidden_gelu), deterministic=deterministic)

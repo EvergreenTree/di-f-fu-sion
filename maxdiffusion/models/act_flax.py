@@ -1,21 +1,21 @@
 import functools
 import jax
 import jax.numpy as jnp
-from jax import nn
-from typing import Optional
+import flax.linen as nn
+from typing import Optional, Callable
 
-@functools.partial(jax.jit, static_argnames=['channel_axis','variant','eps','num_groups','dim','share_axis'])
-def colu(input: jnp.ndarray, 
+@functools.partial(jax.jit, static_argnames=['channel_axis','scaling','eps','num_groups','dim','share_axis'])
+def colu(input: jax.Array, 
          channel_axis: int = -1, 
-         variant: str = "hard", 
+         scaling: str = "hard", 
          eps: float = 1e-7, 
          num_groups: Optional[int] = None, 
          dim: Optional[int] = 4, 
          share_axis: bool = False
-         ):
+         ) -> jax.Array:
     """project the input x onto the axes dimension"""
     """G=number of cones, S=dim of cones"""
-    """output dimension = S = axes + cone sections = [len=(G or 1)] + G * [len=(S-1)]"""
+    """output dimension = C = axes + cone sections = [len=(G or 1)] + G * [len=(S-1)]"""
     """jnp.moveaxis is avoided to optimize speed on TPU"""
     shape = input.shape
     if len(shape) == 0:
@@ -38,7 +38,7 @@ def colu(input: jnp.ndarray,
             num_groups = shape[channel_axis] // dim
 
     if dim == 2: # pointwise case
-        return nn.silu(input) if variant == "soft" else nn.relu(input)
+        return nn.silu(input) if scaling == "soft" else nn.relu(input)
         
     # y = axes, x = cone sections
     if share_axis:
@@ -62,16 +62,16 @@ def colu(input: jnp.ndarray,
     xn = jnp.linalg.norm(x,axis=channel_axis,keepdims=True) # NG1HW
     
     mask = y / (xn + eps) # NG1HW
-    if variant == "sqrt":
+    if scaling == "sqrt":
         mask = jnp.sqrt(mask)
-    elif variant == "log":
+    elif scaling == "log":
         mask = jnp.log(jnp.max(mask,0)+1)
-    elif variant == "soft":
+    elif scaling == "soft": # TODO: there's a discontinuity of x1/x_1 at 0
         mask = nn.sigmoid(mask - .5)
-    elif variant == "hard":
+    elif scaling == "hard":
         mask = mask.clip(0,1)
     else:
-        raise NotImplementedError("variant must be soft or hard.")
+        raise NotImplementedError
 
     x = mask * x # NGSHW
     x = x.reshape(x_old_shape)
@@ -81,7 +81,7 @@ def colu(input: jnp.ndarray,
     return output
 
 @functools.partial(jax.jit, static_argnames=['scaling','eps'])
-def rcolu_(x, scaling="constant",eps=1e-8):
+def rcolu_(x: jax.Array, scaling: str="hard",eps: float=1e-8) -> jax.Array:
     """x = w + v, v || e"""
     C = x.shape[-1]
     # e = jnp.ones(C) / jnp.sqrt(C)
@@ -90,24 +90,29 @@ def rcolu_(x, scaling="constant",eps=1e-8):
     w = x - v
     wn = jnp.linalg.norm(w, axis=-1, keepdims=True)
     m = jnp.maximum(vn, 0.) / (wn + eps)
-    m = jnp.minimum(m, 1.) 
+    if scaling == 'hard':
+        m = jnp.minimum(m, 1.) 
+    elif scaling == "soft": # TODO: there's a discontinuity of x1/x_1 at 0
+        m = nn.sigmoid(m - .5)
+    else:
+        raise NotImplementedError
     w_ = w * m # project onto cone
     x = v + w_
     
     return x
 
 @functools.partial(jax.jit, static_argnames=['dim','num_groups','axis','scaling','eps'])
-def rcolu(x,
-          dim=8,
-          num_groups=None,
-          scaling='constant',
-          axis=-1,
-          eps=1e-7
-          ):
-    """dim=S, num_groups=S"""
+def rcolu(x: jax.Array,
+          dim: Optional[int]=4,
+          num_groups: Optional[int]=None,
+          scaling: str='hard',
+          axis: int=-1,
+          eps: float=1e-7
+          ) -> jax.Array:
+    """dim=S, num_groups=G"""
     if len(x.shape) == 0:
         return x
-    assert (dim is not None) ^ (num_groups is not None) # specify one of both
+    assert (dim is not None) ^ (num_groups is not None) # specify one and only one of both
     shape = x.shape
     if dim is None:
         assert shape[-1] % num_groups == 0
@@ -125,22 +130,240 @@ def rcolu(x,
         x = jnp.moveaxis(x, -1, axis)
     return x
 
-# # some test
-# x = jnp.zeros(6).at[0].set(1)
-# y = rcolu(x,dim=3)
-# y.shape
-# # some assertion 
-# y1 = jnp.sum(y,axis=-1,keepdims=True) / jnp.sqrt(3) # dot(y, e)
-# jnp.linalg.norm(y) / y1
 
-def apply_conv(conv,x,conv3d=False):
-    if conv3d:
-        x_shape = x.shape
-        assert x_shape[-1] % 4 == 0
-        x_new_shape = x_shape[:-1] + (x_shape[-1]//4, 4)
-        x = x.reshape(x_new_shape)
-        x = conv(x)
-        x = x.reshape(x_shape)
-        return x
-    else:
-        return conv(x)
+# Option 1: this should be combined by jitting the resulting function as follows (deprecated)
+# jax.jit(functools.partial(apply_conv, conv_fn),static_argnames=['conv3d'])
+# def apply_conv(conv_fn,x,conv3d=False):
+#     if conv3d:
+#         x_shape = x.shape
+#         assert x_shape[-1] % 4 == 0
+#         x_new_shape = x_shape[:-1] + (x_shape[-1]//4, 4)
+#         x = x.reshape(x_new_shape)
+#         x = conv_fn(x)
+#         x = x.reshape(x_shape)
+#         return x
+#     else:
+#         return conv_fn(x)
+
+# Option 2: use closure (deprecated)
+# def make_conv(conv_fn:Callable,conv3d:bool=False):
+#     if conv3d:
+#         @jax.jit
+#         def conv(x):
+#             x_shape = x.shape
+#             assert x_shape[-1] % 4 == 0
+#             x_new_shape = x_shape[:-1] + (x_shape[-1]//4, 4)
+#             x = x.reshape(x_new_shape)
+#             x = conv_fn(x)
+#             x = x.reshape(x_shape)
+#             return x
+#     else:
+#         @jax.jit
+#         def conv(x):
+#             return conv_fn(x)
+#     return conv 
+
+# Option 3: inherit nn.Module class
+class PolyConv(nn.Conv):
+    conv3d: bool = False
+    dim: Optional[int] = 4 # input tangent space dimension
+    # note: `features` is the output tangent space dimension
+    down: int = 1
+
+    def __call__(self,x,**kwargs):
+        if self.conv3d:
+            x_shape = x.shape
+            assert x_shape[-1] % self.dim == 0
+            x_new_shape = x_shape[:-1] + (x_shape[-1] // self.dim, self.dim)
+            x = x.reshape(x_new_shape) # imagine a tangent space...
+            x = super().__call__(x,**kwargs)
+            if self.down != 1: # int(stride): downsample rate
+                assert x_shape[-3] % self.down == 0 and x_shape[-2] % self.down == 0 # make sure we are on the same page
+                x_shape = x_shape[:-3] + (x_shape[-3]//self.down,x_shape[-2]//self.down,x_shape[-1],)
+            if self.dim != self.features: # channel resampling!
+                x_shape = x_shape[:-1] + (x_shape[-1] // self.dim * self.features,)
+            x = x.reshape(x_shape) # go back to reality...
+            return x
+        else:
+            return super().__call__(x,**kwargs)
+
+class WrappedDense(nn.Dense):
+    conv3d: bool = False
+    dim: Optional[int] = None
+
+# preset configs
+def make_conv(method: str, conv3d: bool, out_channels: int, in_channels: Optional[int] = None, **kwargs) -> nn.Module:
+    # if in_channels and in_channels != out_channels: # in_channels checking dropped! thanks to follow ups on channel resizing
+    #     conv3d = False
+    if method == '3x3':
+        if conv3d:
+            return PolyConv(
+                features=4,
+                kernel_size=(3, 3, 3),
+                strides=(1, 1, 1),
+                padding=((1, 1), (1, 1), (1, 1)),
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=4,
+                **kwargs
+            )
+        else: 
+            return PolyConv(
+                features=out_channels,
+                kernel_size=(3, 3),
+                strides=(1, 1),
+                padding=((1, 1), (1, 1)),
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    elif method == 'down':
+        if conv3d:
+            return PolyConv(
+                features=4,
+                kernel_size=(3, 3, 3),
+                strides=(2, 2, 1),
+                padding=((1, 1), (1, 1), (1, 1)),  # padding="VALID",
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=4,
+                down=2,
+                **kwargs
+            )
+        else:
+            return PolyConv(
+                out_channels,
+                kernel_size=(3, 3),
+                strides=(2, 2),
+                padding=((1, 1), (1, 1)),  # padding="VALID",
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    elif method == '1x1': # used in attention
+        if conv3d:
+            return PolyConv(
+                features=4,
+                kernel_size=(1, 1, 3),
+                strides=(1, 1, 1),
+                padding=(0, 0, 1),  # padding="VALID",
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=4,
+                **kwargs
+            )
+        else:
+            return PolyConv(
+                out_channels,
+                kernel_size=(1, 1),
+                strides=(1, 1),
+                kernel_init = nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', 'keep_2', 'conv_in', 'conv_out')
+                ),
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    elif method == 'dense':
+        if conv3d:
+            return PolyConv(
+                features=4,
+                kernel_size=(3,),
+                strides=(1,),
+                padding=((1, 1),),
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', "conv_in", "conv_out")
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=4,
+                **kwargs
+            )
+        else:
+            return WrappedDense(
+                out_channels,
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ("conv_in", "conv_out") # don't use ("embed", "heads"). unify!
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    elif method == 'concave': # channel x8 for GEGLU in MLP in Transformer
+        if conv3d:
+            return PolyConv(
+                features=32,
+                kernel_size=(3,),
+                strides=(1,),
+                padding=((1, 1),),
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', "conv_in", "conv_out")
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=4, 
+                **kwargs
+            )
+        else:
+            return WrappedDense(
+                out_channels,
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ("conv_in", "conv_out") 
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    elif method == 'convex': # channel /4
+        if conv3d:
+            return PolyConv(
+                features=4,
+                kernel_size=(3,),
+                strides=(1,),
+                padding=((1, 1),),
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ('keep_1', "conv_in", "conv_out")
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=16, 
+                **kwargs
+            )
+        else:
+            return WrappedDense(
+                out_channels,
+                kernel_init=nn.with_logical_partitioning(
+                    nn.initializers.glorot_normal(),
+                    ("conv_in", "conv_out") 
+                ),
+                use_bias=False,
+                conv3d=conv3d,
+                dim=None,
+                **kwargs
+            )
+    else: raise NotImplementedError

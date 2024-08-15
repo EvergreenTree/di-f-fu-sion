@@ -73,6 +73,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conv3d: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
         resnets = []
@@ -108,7 +109,8 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=self.conv3d,
+                conv3d=False,
+                cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)
 
@@ -116,7 +118,10 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
         self.attentions = attentions
 
         if self.add_downsample:
-            self.downsamplers_0 = FlaxDownsample2D(self.out_channels, dtype=self.dtype)
+            self.downsamplers_0 = FlaxDownsample2D(self.out_channels, 
+                                    dtype=self.dtype,
+                                    conv3d=self.conv3d,
+                                )
 
     def __call__(self, hidden_states, temb, encoder_hidden_states=None, deterministic=True):
         output_states = ()
@@ -180,7 +185,10 @@ class FlaxDownBlock2D(nn.Module):
         self.resnets = resnets
 
         if self.add_downsample:
-            self.downsamplers_0 = FlaxDownsample2D(self.out_channels, dtype=self.dtype)
+            self.downsamplers_0 = FlaxDownsample2D(self.out_channels, 
+                                    dtype=self.dtype,
+                                    conv3d=self.conv3d,
+                                )
 
     def __call__(self, hidden_states, temb, deterministic=True):
         output_states = ()
@@ -250,6 +258,8 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conv3d: bool = False
+    up_skip: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
         resnets = []
@@ -260,7 +270,7 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
             resnet_in_channels = self.prev_output_channel if i == 0 else self.out_channels
 
             res_block = FlaxResnetBlock2D(
-                in_channels=resnet_in_channels + res_skip_channels,
+                in_channels=resnet_in_channels if self.up_skip else resnet_in_channels + res_skip_channels,
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
@@ -286,7 +296,8 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=self.conv3d,
+                conv3d=False,
+                cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)
 
@@ -294,17 +305,25 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
         self.attentions = attentions
 
         if self.add_upsample:
-            self.upsamplers_0 = FlaxUpsample2D(self.out_channels, dtype=self.dtype)
+            self.upsamplers_0 = FlaxUpsample2D(self.out_channels, 
+                                    dtype=self.dtype,
+                                    conv3d=self.conv3d,
+                                )
 
     def __call__(self, hidden_states, res_hidden_states_tuple, temb, encoder_hidden_states, deterministic=True):
         for resnet, attn in zip(self.resnets, self.attentions):
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-            hidden_states = jnp.concatenate((hidden_states, res_hidden_states), axis=-1)
+
+            if not self.up_skip:
+                hidden_states = jnp.concatenate((hidden_states, res_hidden_states), axis=-1)
 
             hidden_states = resnet(hidden_states, temb, deterministic=deterministic)
             hidden_states = attn(hidden_states, encoder_hidden_states, deterministic=deterministic)
+
+            if self.up_skip:
+                hidden_states += res_hidden_states
 
         if self.add_upsample:
             hidden_states = self.upsamplers_0(hidden_states)
@@ -342,6 +361,7 @@ class FlaxUpBlock2D(nn.Module):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conv3d: bool = False
+    up_skip: bool = False
 
     def setup(self):
         resnets = []
@@ -351,7 +371,7 @@ class FlaxUpBlock2D(nn.Module):
             resnet_in_channels = self.prev_output_channel if i == 0 else self.out_channels
 
             res_block = FlaxResnetBlock2D(
-                in_channels=resnet_in_channels + res_skip_channels,
+                in_channels=resnet_in_channels if self.up_skip else resnet_in_channels + res_skip_channels,
                 out_channels=self.out_channels,
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
@@ -364,16 +384,24 @@ class FlaxUpBlock2D(nn.Module):
         self.resnets = resnets
 
         if self.add_upsample:
-            self.upsamplers_0 = FlaxUpsample2D(self.out_channels, dtype=self.dtype)
+            self.upsamplers_0 = FlaxUpsample2D(self.out_channels, 
+                                    dtype=self.dtype,
+                                    conv3d=self.conv3d,
+                                )
 
     def __call__(self, hidden_states, res_hidden_states_tuple, temb, deterministic=True):
         for resnet in self.resnets:
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-            hidden_states = jnp.concatenate((hidden_states, res_hidden_states), axis=-1)
+
+            if not self.up_skip:
+                hidden_states = jnp.concatenate((hidden_states, res_hidden_states), axis=-1)
 
             hidden_states = resnet(hidden_states, temb, deterministic=deterministic)
+
+            if self.up_skip:
+                hidden_states += res_hidden_states
 
         if self.add_upsample:
             hidden_states = self.upsamplers_0(hidden_states)
@@ -426,6 +454,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
     norm_num_groups: int = 32
     act_fn: str = "silu"
     conv3d: bool = False
+    cross_attention_dim: int = 1280
 
     def setup(self):
         # there is always at least one resnet
@@ -459,7 +488,8 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=self.conv3d,
+                conv3d=False,
+                cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)
 
@@ -469,7 +499,8 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 dropout_prob=self.dropout,
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
-                act_fn=self.act_fn
+                act_fn=self.act_fn,
+                conv3d=self.conv3d,
             )
             resnets.append(res_block)
 

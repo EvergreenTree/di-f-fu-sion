@@ -1,9 +1,15 @@
 import ml_collections
 
+DATASET = 'cifar10'
+ACT_FN = 'relu'
+CONV3D = True
+UP_SKIP = True
+NAME = DATASET+'-'+ACT_FN+'-'+('conv3d' if CONV3D else 'conv2d')
+
 def get_config():
     config = ml_collections.ConfigDict()
 
-    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/cifar10-conv3d-colu'
+    config.workdir = '/home/evergreen/di-f-fu-sion/wandb/'+NAME
     config.wandb_artifact = None
 
     # wandb
@@ -11,7 +17,7 @@ def get_config():
     wandb.entity = None
     wandb.project = "ddpm-flax-cifar10-activation"
     wandb.job_type = "training"
-    wandb.name = 'conv3d' 
+    wandb.name = NAME
     wandb.log_train = True
     wandb.log_sample = True
     wandb.log_model = True
@@ -49,7 +55,7 @@ def get_config():
 
     # data
     config.data = data = ml_collections.ConfigDict()
-    data.dataset ='cifar10'
+    data.dataset = DATASET
     data.batch_size = 128
     data.cache = False
     data.image_size = 32
@@ -59,9 +65,11 @@ def get_config():
     # model
     config.model = model = ml_collections.ConfigDict()
     model.block_out_channels = (256,256,256,256)
+    model.cross_attention_dim = 256
     model.layers_per_block = 1
-    model.act_fn = 'colu'
-    model.conv3d = True
+    model.act_fn = ACT_FN
+    model.conv3d = CONV3D
+    model.up_skip = UP_SKIP
 
 
     # optim

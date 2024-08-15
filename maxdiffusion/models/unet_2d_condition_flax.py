@@ -122,7 +122,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     layers_per_block: int = 2
     attention_head_dim: Union[int, Tuple[int]] = 8
     num_attention_heads: Optional[Union[int, Tuple[int]]] = None
-    cross_attention_dim: int = 1280
+    cross_attention_dim: int = 1280 # 320 * 4
     dropout: float = 0.0
     use_linear_projection: bool = False
     dtype: jnp.dtype = jnp.float32
@@ -143,6 +143,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     act_fn: str = "silu"
     conditional: bool = True
     conv3d: bool = False
+    up_skip: bool = False
 
     def init_weights(self, rng: jax.Array, eval_only: bool = False, per_device_batch_size: int = 1) -> FrozenDict:
         # init input tensors
@@ -182,7 +183,8 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
 
     def setup(self):
         block_out_channels = self.block_out_channels
-        time_embed_dim = block_out_channels[0] * 4
+        time_steps_dim = block_out_channels[0] # number of Fourier bases
+        time_embed_dim = self.cross_attention_dim # cq: this should not be block_out_channels[0] * 4 
 
         if self.num_attention_heads is not None:
             raise ValueError(
@@ -208,9 +210,9 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
 
         # time
         self.time_proj = FlaxTimesteps(
-            block_out_channels[0], flip_sin_to_cos=self.flip_sin_to_cos, freq_shift=self.config.freq_shift
+            time_steps_dim, flip_sin_to_cos=self.flip_sin_to_cos, freq_shift=self.config.freq_shift
         )
-        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype)
+        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=False)
 
         only_cross_attention = self.only_cross_attention
         if isinstance(only_cross_attention, bool):
@@ -233,7 +235,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     f"addition_embed_type {self.addition_embed_type} requires `addition_time_embed_dim` to not be None"
                 )
             self.add_time_proj = FlaxTimesteps(self.addition_time_embed_dim, self.flip_sin_to_cos, self.freq_shift)
-            self.add_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype)
+            self.add_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=False)
         else:
             raise ValueError(f"addition_embed_type: {self.addition_embed_type} must be None or `text_time`.")
 
@@ -265,6 +267,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     dtype=self.dtype,
                     act_fn=self.act_fn,
                     conv3d=self.conv3d,
+                    cross_attention_dim=self.cross_attention_dim,
                 )
             else:
                 down_block = FlaxDownBlock2D(
@@ -275,6 +278,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     add_downsample=not is_final_block,
                     dtype=self.dtype,
                     act_fn=self.act_fn,
+                    conv3d=self.conv3d,
                 )
 
             down_blocks.append(down_block)
@@ -296,6 +300,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
             dtype=self.dtype,
             act_fn=self.act_fn,
             conv3d=self.conv3d,
+            cross_attention_dim=self.cross_attention_dim,
         )
 
         # up
@@ -333,6 +338,8 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     dtype=self.dtype,
                     act_fn=self.act_fn,
                     conv3d=self.conv3d,
+                    up_skip=self.up_skip,
+                    cross_attention_dim=self.cross_attention_dim,
                 )
             else:
                 up_block = FlaxUpBlock2D(
@@ -345,6 +352,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     dtype=self.dtype,
                     act_fn=self.act_fn,
                     conv3d=self.conv3d,
+                    up_skip=self.up_skip,
                 )
 
             up_blocks.append(up_block)
