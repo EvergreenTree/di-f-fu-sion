@@ -109,7 +109,7 @@ class FlaxCrossAttnDownBlock2D(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=False,
+                conv3d=self.conv3d,
                 cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)
@@ -296,7 +296,7 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=False,
+                conv3d=self.conv3d,
                 cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)
@@ -488,7 +488,7 @@ class FlaxUNetMidBlock2DCrossAttn(nn.Module):
                 dtype=self.dtype,
                 norm_num_groups=self.norm_num_groups,
                 act_fn=self.act_fn,
-                conv3d=False,
+                conv3d=self.conv3d,
                 cross_attention_dim=self.cross_attention_dim,
             )
             attentions.append(attn_block)

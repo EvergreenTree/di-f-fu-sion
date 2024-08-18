@@ -31,7 +31,6 @@ import wandb
 
 from maxdiffusion import FlaxUNet2DConditionModel
 
-
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
@@ -596,4 +595,7 @@ if __name__ == '__main__': # test the unet parameters
     from maxdiffusion.configs.cifar10 import get_config
     config = get_config()
     state = create_train_state(jax.random.PRNGKey(0),config)
-    print(jax.tree.map(lambda x: x.shape,state.params))
+    # print(jax.tree.map(lambda x:getattr(x.shape,'value',x.shape),state.params))
+    from maxdiffusion.max_utils import calculate_num_params_from_pytree
+    num_model_parameters = calculate_num_params_from_pytree(state.params)
+    print(f"number parameters: {num_model_parameters/10**6:.3f} million")

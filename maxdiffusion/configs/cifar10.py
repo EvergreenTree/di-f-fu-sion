@@ -2,8 +2,8 @@ import ml_collections
 
 DATASET = 'cifar10'
 ACT_FN = 'relu'
-CONV3D = True
-UP_SKIP = True
+CONV3D = False
+UP_SKIP = False
 NAME = DATASET+'-'+ACT_FN+'-'+('conv3d' if CONV3D else 'conv2d')
 
 def get_config():
@@ -64,12 +64,14 @@ def get_config():
 
     # model
     config.model = model = ml_collections.ConfigDict()
-    model.block_out_channels = (256,256,256,256)
-    model.cross_attention_dim = 256
-    model.layers_per_block = 1
+    C = 256
+    model.block_out_channels = (320, 640, 1280, 1280)
+    model.layers_per_block = 2
+    model.cross_attention_dim = 1280
     model.act_fn = ACT_FN
     model.conv3d = CONV3D
     model.up_skip = UP_SKIP
+    model.dim_torus = 4
 
 
     # optim

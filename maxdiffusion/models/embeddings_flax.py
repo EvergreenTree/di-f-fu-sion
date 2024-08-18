@@ -74,7 +74,7 @@ class FlaxTimestepEmbedding(nn.Module):
 
     @nn.compact
     def __call__(self, temb):
-        temb = make_conv('dense',conv3d=False, out_channels=self.time_embed_dim, dtype=self.dtype, name="linear_1")(temb) # disable since temb Fourier bases does not match word vectors
+        temb = make_conv('dense',conv3d=self.conv3d, out_channels=self.time_embed_dim, dtype=self.dtype, name="linear_1")(temb) # disable since temb Fourier bases does not match word vectors
         if self.act_fn == 'silu':
             temb = nn.silu(temb)
         elif self.act_fn == 'relu':

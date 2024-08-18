@@ -144,6 +144,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
     conditional: bool = True
     conv3d: bool = False
     up_skip: bool = False
+    dim_torus: int = 1
 
     def init_weights(self, rng: jax.Array, eval_only: bool = False, per_device_batch_size: int = 1) -> FrozenDict:
         # init input tensors
@@ -212,7 +213,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
         self.time_proj = FlaxTimesteps(
             time_steps_dim, flip_sin_to_cos=self.flip_sin_to_cos, freq_shift=self.config.freq_shift
         )
-        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=False)
+        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=self.conv3d)
 
         only_cross_attention = self.only_cross_attention
         if isinstance(only_cross_attention, bool):
@@ -235,7 +236,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
                     f"addition_embed_type {self.addition_embed_type} requires `addition_time_embed_dim` to not be None"
                 )
             self.add_time_proj = FlaxTimesteps(self.addition_time_embed_dim, self.flip_sin_to_cos, self.freq_shift)
-            self.add_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=False)
+            self.add_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=self.conv3d)
         else:
             raise ValueError(f"addition_embed_type: {self.addition_embed_type} must be None or `text_time`.")
 

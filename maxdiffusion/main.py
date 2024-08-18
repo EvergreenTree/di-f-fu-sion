@@ -6,7 +6,11 @@ from absl import flags
 from ml_collections import config_flags
 from maxdiffusion.models.train_alt import *
 
+from maxdiffusion import max_utils
+
 FLAGS = flags.FLAGS
+
+logging.set_verbosity(logging.WARNING)
 
 config_flags.DEFINE_config_file(
     'config',
@@ -43,6 +47,9 @@ def train(config):
     
     rng, state_rng = jax.random.split(rng)
     state = create_train_state(state_rng, config)
+    num_model_parameters = max_utils.calculate_num_params_from_pytree(state.params)
+    logging.info(f"number parameters: {num_model_parameters/10**9:.3f} billion")
+    print(f"number parameters: {num_model_parameters/10**9:.3f} billion")
     wandb_artifact = config.wandb_artifact
     if wandb_artifact is not None:
         logging.info(f'loading model from wandb: {wandb_artifact}')
@@ -98,7 +105,7 @@ def train(config):
                 train_metrics = common_utils.get_metrics(train_metrics)
                 summary = {
                         f'train/{k}': v
-                        for k, v in jax.tree_map(lambda x: x.mean(), train_metrics).items()
+                        for k, v in jax.tree.map(lambda x: x.mean(), train_metrics).items()
                     }
                 summary['time/seconds_per_step'] =  (time.time() - train_metrics_last_t) /config.training.log_every_steps
 
