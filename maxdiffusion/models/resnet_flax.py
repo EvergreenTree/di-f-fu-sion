@@ -97,10 +97,10 @@ class FlaxResnetBlock2D(nn.Module):
 
         self.conv_shortcut = None
         if use_nin_shortcut:
-            self.conv_shortcut = make_conv('1x1', conv3d=self.conv3d, out_channels=self.out_channels, in_channels=self.in_channels, dtype=self.dtype,)
+            self.conv_shortcut = make_conv('1x1', conv3d=self.conv3d, out_channels=self.out_channels,  dtype=self.dtype,)
         out_channels = self.in_channels if self.out_channels is None else self.out_channels
 
-        self.conv1 = make_conv('3x3', conv3d=self.conv3d, out_channels=self.out_channels, in_channels=self.in_channels, dtype=self.dtype,)
+        self.conv1 = make_conv('3x3', conv3d=self.conv3d, out_channels=self.out_channels, dtype=self.dtype,)
 
         self.time_emb_proj = make_conv('dense',conv3d=self.conv3d, out_channels=self.out_channels, dtype=self.dtype,) 
         

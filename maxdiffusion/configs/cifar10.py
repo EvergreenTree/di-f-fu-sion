@@ -9,7 +9,7 @@ NAME = DATASET+'-'+ACT_FN+'-'+('conv3d' if CONV3D else 'conv2d')
 def get_config():
     config = ml_collections.ConfigDict()
 
-    config.workdir = '/home/evergreen/di-f-fu-sion/wandb/'+NAME
+    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/wandb/'+NAME
     config.wandb_artifact = None
 
     # wandb

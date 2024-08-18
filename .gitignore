@@ -6,6 +6,7 @@
 */wandb
 /wandb
 /cifar10-*
+/CIFAR
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
