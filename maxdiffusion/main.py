@@ -108,7 +108,7 @@ def train(config):
                         for k, v in jax.tree.map(lambda x: x.mean(), train_metrics).items()
                     }
                 summary['time/seconds_per_step'] =  (time.time() - train_metrics_last_t) /config.training.log_every_steps
-
+                summary['num_model_parameters'] = num_model_parameters
                 writer.write_scalars(step + 1, summary)
                 train_metrics = []
                 train_metrics_last_t = time.time()

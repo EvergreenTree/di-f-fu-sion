@@ -268,6 +268,7 @@ def create_train_state(rng, config: ml_collections.ConfigDict):
       conv3d=config.model.conv3d,
       up_skip=config.model.up_skip,
       cross_attention_dim=config.model.cross_attention_dim,
+      dim_torus=4,
       )
 
   params = initialized(rng, model)
