@@ -213,7 +213,7 @@ class FlaxUNet2DConditionModel(nn.Module, FlaxModelMixin, ConfigMixin):
         self.time_proj = FlaxTimesteps(
             time_steps_dim, flip_sin_to_cos=self.flip_sin_to_cos, freq_shift=self.config.freq_shift
         )
-        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=self.conv3d)
+        self.time_embedding = FlaxTimestepEmbedding(time_embed_dim, dtype=self.dtype, conv3d=False)
 
         only_cross_attention = self.only_cross_attention
         if isinstance(only_cross_attention, bool):

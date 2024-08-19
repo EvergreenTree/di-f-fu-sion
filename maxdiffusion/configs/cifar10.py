@@ -2,14 +2,14 @@ import ml_collections
 
 DATASET = 'cifar10'
 ACT_FN = 'relu'
-CONV3D = False
+CONV3D = True
 UP_SKIP = False
 NAME = DATASET+'-'+ACT_FN+'-'+('conv3d' if CONV3D else 'conv2d')
 
 def get_config():
     config = ml_collections.ConfigDict()
 
-    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/wandb/'+NAME
+    config.workdir = '/home/evergreen/nfs_share/di-f-fu-sion/wandb/'+NAME+'-low_feat'
     config.wandb_artifact = None
 
     # wandb

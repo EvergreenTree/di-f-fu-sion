@@ -16,10 +16,11 @@ from flax.training import train_state
 import numpy as np
 import wandb
 import flax
-from maxdiffusion.models.act_flax import colu, rcolu, make_conv
+from maxdiffusion.models.act_flax import colu, rcolu, make_conv, make_conv_extrapolation
 
 ACT = colu
 CONV3D = False
+
 
 ############# Utils #############
 from typing import Sequence
@@ -138,7 +139,7 @@ class ResidualBlock(nn.Module):
             use_bias=False,
             kernel_init=self.kernel_init,
             dtype=self.dtype,
-        )(x) if not CONV3D else make_conv('3x3',conv3d=True,features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
+        )(x) if not CONV3D else make_conv_extrapolation(features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
         x = self.norm()(x)
         x = ACT(x)
         x = nn.Conv(
@@ -149,7 +150,7 @@ class ResidualBlock(nn.Module):
             use_bias=False,
             kernel_init=self.kernel_init,
             dtype=self.dtype,
-        )(x) if not CONV3D else make_conv('3x3',conv3d=True,features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
+        )(x) if not CONV3D else make_conv_extrapolation(features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
         x = self.norm()(x)
 
         x = x + residual
@@ -183,7 +184,7 @@ class DownSampleResidualBlock(nn.Module):
             use_bias=False,
             kernel_init=self.kernel_init,
             dtype=self.dtype,
-        )(x) if not CONV3D else make_conv('3x3',conv3d=True,features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
+        )(x) if not CONV3D else make_conv_extrapolation(features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
         x = self.norm()(x)
         x = ACT(x)
         x = nn.Conv(
@@ -194,7 +195,7 @@ class DownSampleResidualBlock(nn.Module):
             use_bias=False,
             kernel_init=self.kernel_init,
             dtype=self.dtype,
-        )(x) if not CONV3D else make_conv('down',conv3d=True,features=self.in_channels,use_bias=False,dtype=self.dtype,)(x)
+        )(x) if not CONV3D else make_conv_extrapolation(down=2,features=self.out_channels,use_bias=False,dtype=self.dtype,)(x)
         x = self.norm()(x)
 
         x = x + self.pad_identity(residual)
@@ -316,7 +317,7 @@ def ResNet44(
 def ResNet56(
     dtype=jnp.float32,
 ):
-    return _resnet(layers=[16, 32, 64], N=9, dtype=dtype, num_classes=10)
+    return _resnet(layers=[256, 512, 1024], N=9, dtype=dtype, num_classes=10)
 
 
 def ResNet110(
@@ -490,7 +491,7 @@ def main():
     rng, init_rng = jax.random.split(rng)
 
     learning_rate_fn = optax.piecewise_constant_schedule(
-        init_value=args.base_lr, boundaries_and_scales={32000: 0.1, 48000: 0.1}
+        init_value=args.base_lr, boundaries_and_scales={32000: 0.1, 48000: 0.01}
     )
 
     state = create_train_state(

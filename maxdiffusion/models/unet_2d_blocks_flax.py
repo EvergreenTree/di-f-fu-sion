@@ -318,10 +318,8 @@ class FlaxCrossAttnUpBlock2D(nn.Module):
 
             if not self.up_skip:
                 hidden_states = jnp.concatenate((hidden_states, res_hidden_states), axis=-1)
-
             hidden_states = resnet(hidden_states, temb, deterministic=deterministic)
             hidden_states = attn(hidden_states, encoder_hidden_states, deterministic=deterministic)
-
             if self.up_skip:
                 hidden_states += res_hidden_states
 

@@ -410,13 +410,13 @@ class FlaxAttention(nn.Module):
             dtype=self.dtype
         )
 
-        self.query = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim,dtype=self.dtype,name="to_q")
+        self.query = make_conv('dense',conv3d=self.conv3d,features=inner_dim,dtype=self.dtype,name="to_q")
 
-        self.key = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim,in_channels=self.cross_attention_dim,dtype=self.dtype,name="to_k")
+        self.key = make_conv('dense',conv3d=self.conv3d,features=inner_dim,dtype=self.dtype,name="to_k")
 
-        self.value = make_conv('dense',conv3d=self.conv3d,out_channels=self.query_dim,in_channels=self.cross_attention_dim,dtype=self.dtype,name="to_v")
+        self.value = make_conv('dense',conv3d=self.conv3d,features=self.query_dim,dtype=self.dtype,name="to_v")
 
-        self.proj_attn = make_conv('dense',conv3d=self.conv3d,out_channels=self.query_dim,dtype=self.dtype,name="to_out_0")
+        self.proj_attn = make_conv('dense',conv3d=self.conv3d,features=self.query_dim,dtype=self.dtype,name="to_out_0")
         self.dropout_layer = nn.Dropout(rate=self.dropout)
 
     def __call__(self, hidden_states, context=None, deterministic=True):
@@ -615,9 +615,9 @@ class FlaxTransformer2DModel(nn.Module):
 
         inner_dim = self.n_heads * self.d_head
         if self.use_linear_projection:
-            self.proj_in = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
+            self.proj_in = make_conv('dense',conv3d=self.conv3d,features=inner_dim, dtype=self.dtype)
         else:
-            self.proj_in = make_conv('1x1',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
+            self.proj_in = make_conv('1x1',conv3d=self.conv3d,features=inner_dim, dtype=self.dtype)
 
         self.transformer_blocks = [
             FlaxBasicTransformerBlock(
@@ -634,16 +634,16 @@ class FlaxTransformer2DModel(nn.Module):
                 flash_block_sizes=self.flash_block_sizes,
                 mesh=self.mesh,
                 act_fn=self.act_fn,
-                conv3d=self.conv3d,
+                conv3d=False,
                 cross_attention_dim=self.cross_attention_dim,
             )
             for _ in range(self.depth)
         ]
 
         if self.use_linear_projection:
-            self.proj_out = make_conv('dense',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
+            self.proj_out = make_conv('dense',conv3d=self.conv3d,features=inner_dim, dtype=self.dtype)
         else:
-            self.proj_out = make_conv('1x1',conv3d=self.conv3d,out_channels=inner_dim, dtype=self.dtype)
+            self.proj_out = make_conv('1x1',conv3d=self.conv3d,features=inner_dim, dtype=self.dtype)
 
         self.dropout_layer = nn.Dropout(rate=self.dropout)
 
@@ -699,7 +699,7 @@ class FlaxFeedForward(nn.Module):
         # The second linear layer needs to be called
         # net_2 for now to match the index of the Sequential layer
         self.net_0 = FlaxGEGLU(self.dim, self.dropout, self.dtype,act_fn=self.act_fn,conv3d=self.conv3d)
-        self.net_2 = make_conv('convex',conv3d=self.conv3d,out_channels=self.dim, dtype=self.dtype) # TODO: enable conv3d for apple-to-apple ablation study
+        self.net_2 = make_conv('dense',conv3d=self.conv3d,features=self.dim, dtype=self.dtype) # TODO: enable conv3d for apple-to-apple ablation study
 
     def __call__(self, hidden_states, deterministic=True):
         hidden_states = self.net_0(hidden_states, deterministic=deterministic)
@@ -729,7 +729,7 @@ class FlaxGEGLU(nn.Module):
     def setup(self):
         inner_dim = self.dim * 4
         # disable conv3d for fair ablation study
-        self.proj = make_conv('concave',conv3d=self.conv3d,in_channels = self.dim, out_channels=inner_dim * 2,dtype=self.dtype,) # cq: TODO: when conv3d=True, make it two separate conv(x4 channels) --done
+        self.proj = make_conv('dense',conv3d=self.conv3d,features=inner_dim * 2,dtype=self.dtype,) # cq: TODO: when conv3d=True, make it two separate conv(x4 channels) --done
         self.dropout_layer = nn.Dropout(rate=self.dropout)
         self.act = nn.gelu # cq: TODO: uncomment the following to change GEGLU variants!
         # if self.act_fn == "silu":

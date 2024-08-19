@@ -172,17 +172,17 @@ class PolyConv(nn.Conv):
 
     def __call__(self,x,**kwargs):
         if self.conv3d:
-            dim = self.features
+            out_channels = self.features * self.dim_torus
             x_shape = x.shape
-            assert x_shape[-1] % dim == 0
-            x_new_shape = x_shape[:-1] + (x_shape[-1] // dim, dim)
+            assert x_shape[-1] % self.dim_torus == 0 # gcd(in_channels,out_channels) mod dim_torus == 0
+            x_new_shape = x_shape[:-1] + (self.dim_torus, x_shape[-1]//self.dim_torus)
             x = x.reshape(x_new_shape) # imagine a tangent space...
             x = super().__call__(x,**kwargs)
             if self.down != 1: # int(stride): downsample rate
                 assert x_shape[-3] % self.down == 0 and x_shape[-2] % self.down == 0 # make sure we are on the same page
-                x_shape = x_shape[:-3] + (x_shape[-3]//self.down,x_shape[-2]//self.down,x_shape[-1],)
-            if dim != self.features: # channel resampling!
-                x_shape = x_shape[:-1] + (x_shape[-1] // dim * self.features,)
+                x_shape = x_shape[:-3] + (x_shape[-3]//self.down,x_shape[-2]//self.down,out_channels,)
+            else:
+                x_shape = x_shape[:-1] + (out_channels,)
             x = x.reshape(x_shape) # go back to reality...
             return x
         else:
@@ -193,7 +193,7 @@ class WrappedDense(nn.Dense):
     dim_torus: Optional[int] = None 
 
 # preset configs
-def make_conv(method: str, conv3d: bool, features: int, dim_torus=4, **kwargs) -> nn.Module:
+def make_conv(method: str, conv3d: bool, features: int, dim_torus=320, **kwargs) -> nn.Module:
     if method == '3x3':
         if conv3d:
             return PolyConv(
@@ -201,10 +201,11 @@ def make_conv(method: str, conv3d: bool, features: int, dim_torus=4, **kwargs) -
                 kernel_size=(3, 3, 3),
                 strides=(1, 1, 1),
                 padding=((1, 1), (1, 1), (1, 1)),
-                kernel_init = nn.with_logical_partitioning(
-                    nn.initializers.glorot_normal(),
-                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
-                ),
+                kernel_init = nn.initializers.glorot_normal(),
+                # nn.with_logical_partitioning(
+                #     nn.initializers.glorot_normal(),
+                #     ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                # ),
                 conv3d=conv3d,
                 dim_torus=dim_torus,
                 **kwargs
@@ -230,10 +231,11 @@ def make_conv(method: str, conv3d: bool, features: int, dim_torus=4, **kwargs) -
                 kernel_size=(3, 3, 3),
                 strides=(2, 2, 1),
                 padding=((1, 1), (1, 1), (1, 1)),  # padding="VALID",
-                kernel_init = nn.with_logical_partitioning(
-                    nn.initializers.glorot_normal(),
-                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
-                ),
+                kernel_init = nn.initializers.glorot_normal(),
+                # nn.with_logical_partitioning(
+                #     nn.initializers.glorot_normal(),
+                #     ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                # ),
                 conv3d=conv3d,
                 dim_torus=dim_torus,
                 down=2,
@@ -260,10 +262,11 @@ def make_conv(method: str, conv3d: bool, features: int, dim_torus=4, **kwargs) -
                 kernel_size=(1, 1, 3),
                 strides=(1, 1, 1),
                 padding=(0, 0, 1),  # padding="VALID",
-                kernel_init = nn.with_logical_partitioning(
-                    nn.initializers.glorot_normal(),
-                    ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
-                ),
+                kernel_init = nn.initializers.glorot_normal(),
+                # nn.with_logical_partitioning(
+                #     nn.initializers.glorot_normal(),
+                #     ('keep_1', 'keep_2', 'keep_3', 'conv_in', 'conv_out')
+                # ),
                 conv3d=conv3d,
                 dim_torus=dim_torus,
                 **kwargs
@@ -337,32 +340,45 @@ def make_conv(method: str, conv3d: bool, features: int, dim_torus=4, **kwargs) -
                 dim_torus=None,
                 **kwargs
             )
-    elif method == 'convex': # resampling preset: channel divide 4, for GEGLU's second layer
-        if conv3d:
-            return PolyConv(
-                features=features//dim_torus//4,
-                kernel_size=(3,),
-                strides=(1,),
-                padding=((1, 1),),
-                kernel_init=nn.with_logical_partitioning(
-                    nn.initializers.glorot_normal(),
-                    ('keep_1', "conv_in", "conv_out")
-                ),
-                use_bias=False,
-                conv3d=conv3d,
-                dim_torus=dim_torus, 
-                **kwargs
-            )
-        else:
-            return WrappedDense(
-                features,
-                kernel_init=nn.with_logical_partitioning(
-                    nn.initializers.glorot_normal(),
-                    ("conv_in", "conv_out") 
-                ),
-                use_bias=False,
-                conv3d=conv3d,
-                dim_torus=None,
-                **kwargs
-            )
+    # the following is deprecated thanks to using dim(tangent_space) instead of dim(rest feature) as argument
+    # elif method == 'convex': # resampling preset: channel divide 4, for GEGLU's second layer
+    #     if conv3d:
+    #         return PolyConv(
+    #             features=features//dim_torus//4,
+    #             kernel_size=(3,),
+    #             strides=(1,),
+    #             padding=((1, 1),),
+    #             kernel_init=nn.with_logical_partitioning(
+    #                 nn.initializers.glorot_normal(),
+    #                 ('keep_1', "conv_in", "conv_out")
+    #             ),
+    #             use_bias=False,
+    #             conv3d=conv3d,
+    #             dim_torus=dim_torus, 
+    #             **kwargs
+    #         )
+    #     else:
+    #         return WrappedDense(
+    #             features,
+    #             kernel_init=nn.with_logical_partitioning(
+    #                 nn.initializers.glorot_normal(),
+    #                 ("conv_in", "conv_out") 
+    #             ),
+    #             use_bias=False,
+    #             conv3d=conv3d,
+    #             dim_torus=None,
+    #             **kwargs
+    #         )
     else: raise NotImplementedError
+
+def make_conv_extrapolation(features: int, dim_torus=16, down=1,**kwargs) -> nn.Module:
+    return PolyConv(
+        features=features//dim_torus,
+        kernel_size=(3, 3, 3),
+        strides=(2, 2, 1) if down==2 else (1,1,1),
+        padding=((1, 1), (1, 1), (1, 1)),
+        conv3d=True,
+        down=down,
+        dim_torus=dim_torus,
+        **kwargs
+    )
