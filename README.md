@@ -7,7 +7,7 @@ Based on: [diffusers](https://github.com/huggingface/diffusers/tree/main/example
 
 ## Training
 ```
-python maxdiffusion/main.py --config=maxdiffusion/configs/imagenet.py
+python main.py --config=fusion/configs/imagenet.py
 ```
 
 # Demos:
