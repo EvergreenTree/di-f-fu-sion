@@ -15,5 +15,5 @@ python main.py --config=fusion/configs/imagenet.py
 [parameter_count.ipynb](parameter_count.ipynb)
 
 # Contributions:
-- Orthogonal symmetry in general-purpose model design for acceleration
-- Translation symmetry in general-purpose model design for compression
+- Orthogonal symmetry in general-purpose model design for better performance
+- Translation symmetry in general-purpose model design for lightweight models
