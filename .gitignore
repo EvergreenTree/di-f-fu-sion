@@ -7,6 +7,8 @@
 /wandb
 /cifar10-*
 /CIFAR
+maxdiffusion/inputs
+maxdiffusion/outputs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
