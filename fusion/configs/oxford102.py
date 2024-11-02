@@ -1,7 +1,7 @@
 import ml_collections
 
 DATASET = 'oxford_flowers102'
-ACT_FN = 'rcolu'
+ACT_FN = 'colu'
 CONV3D = False
 UP_SKIP = False
 NAME = DATASET+'-'+ACT_FN+'-'+('conv3d' if CONV3D else 'conv2d')

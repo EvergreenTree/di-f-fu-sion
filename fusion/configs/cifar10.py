@@ -64,13 +64,9 @@ def get_config():
 
     # model
     config.model = model = ml_collections.ConfigDict()
-    C = 256
-    # model.block_out_channels = (320, 640, 1280, 1280)
-    # model.layers_per_block = 2
-    # model.cross_attention_dim = 1280
-    model.block_out_channels = (C, C, C, C)
+    model.block_out_channels = (128, 256, 256, 256)
     model.layers_per_block = 1
-    model.cross_attention_dim = C
+    model.cross_attention_dim = 256
     model.act_fn = ACT_FN
     model.conv3d = CONV3D
     model.up_skip = UP_SKIP
