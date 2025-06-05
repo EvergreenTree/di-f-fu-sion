@@ -550,18 +550,15 @@ def make_grid(samples, n_samples, padding=2, pad_value=0.0):
 
 
 def save_image(samples, n_samples, fp, padding=2, pad_value=0.0, format=None):
-  """Make a grid of images and Save it into an image file.
+  """Save a batch of images arranged in a grid.
 
   Args:
-    ndarray (array_like): 4D mini-batch images of shape (B x H x W x C).
-    fp: A filename(string) or file object.
-    nrow (int, optional): Number of images displayed in each row of the grid.
-      The final grid size is ``(B / nrow, nrow)``. Default: ``8``.
-    padding (int, optional): amount of padding. Default: ``2``.
-    pad_value (float, optional): Value for the padded pixels. Default: ``0``.
-    format(Optional):  If omitted, the format to use is determined from the
-      filename extension. If a file object was used instead of a filename, this
-      parameter should always be used.
+    samples (array_like): 4D batch of images with shape ``(B, H, W, C)``.
+    n_samples (int): Number of images from ``samples`` to arrange into the grid.
+    fp: A filename (``str``) or file object where the image will be saved.
+    padding (int, optional): Amount of padding between images. Defaults to ``2``.
+    pad_value (float, optional): Pixel value used for the padding. Defaults to ``0``.
+    format (Optional[str]): Image format. If omitted, inferred from ``fp``.
   """
 
   grid = make_grid(samples, n_samples, padding, pad_value)
