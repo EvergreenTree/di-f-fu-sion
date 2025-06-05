@@ -307,7 +307,7 @@ def get_loss_fn(config):
         loss_fn = l2_loss
     else:
         raise NotImplementedError(
-           f'loss_type {config.training.loss_tyoe} not supported yet!')
+           f'loss_type {config.training.loss_type} not supported yet!')
 
     return loss_fn
 
