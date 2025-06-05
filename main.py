@@ -137,7 +137,7 @@ def train(config):
                 samples_array = save_image(samples, config.training.num_sample, fout, padding=2)
                 if config.wandb.log_sample and jax.process_index() == 0:
                     wandb_log_image(samples_array, step+1)
-            # save the chceckpoint
+            # save the checkpoint
             save_checkpoint(state, workdir)
             # if step + 1 == num_steps and config.wandb.log_model:
             #     wandb_log_model(workdir, step+1)
